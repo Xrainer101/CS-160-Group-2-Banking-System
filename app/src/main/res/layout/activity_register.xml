@@ -1,110 +1,216 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Registration screen -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/page_bg"
     android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="20dp">
+
+        <!-- Brand: "T2" badge + Team 2 Bank / Online Banking -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="42dp"
+                android:layout_height="42dp"
+                android:background="@drawable/bg_brand"
+                android:gravity="center"
+                android:text="T2"
+                android:textColor="@color/white"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="11dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Team 2 Bank"
+                    android:textColor="@color/text_dark"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Online Banking"
+                    android:textColor="@color/text_muted"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Heading -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="40dp"
+            android:layout_marginBottom="6dp"
+            android:letterSpacing="0.12"
+            android:text="GET STARTED"
+            android:textColor="@color/label_blue"
+            android:textSize="11sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/textTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="32dp"
-            android:gravity="center"
-            android:text="Meridian bank"
-            android:textSize="24sp"
+            android:text="Open an account"
+            android:textColor="@color/text_dark"
+            android:textSize="26sp"
             android:textStyle="bold" />
 
         <TextView
             android:id="@+id/textSubtitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="32dp"
-            android:gravity="center"
-            android:text="Create your account" />
+            android:layout_marginTop="6dp"
+            android:text="Fill in your details to set up online banking."
+            android:textColor="@color/text_gray"
+            android:textSize="14sp" />
 
-        <EditText
-            android:id="@+id/editFullName"
+        <!-- Form card -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:autofillHints="name"
-            android:hint="Full name"
-            android:inputType="textPersonName"
-            android:minHeight="48dp" />
+            android:layout_marginTop="24dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="22dp">
 
-        <EditText
-            android:id="@+id/editDateOfBirth"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:autofillHints="birthDateFull"
-            android:hint="Date of birth (MM/DD/YYYY)"
-            android:inputType="date"
-            android:minHeight="48dp" />
+            <TextView
+                style="@style/FieldLabel"
+                android:labelFor="@id/editFullName"
+                android:text="Full name" />
 
-        <EditText
-            android:id="@+id/editEmail"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:autofillHints="emailAddress"
-            android:hint="Email"
-            android:inputType="textEmailAddress"
-            android:minHeight="48dp" />
+            <EditText
+                android:id="@+id/editFullName"
+                style="@style/FieldInput"
+                android:autofillHints="name"
+                android:hint="Jane Doe"
+                android:inputType="textPersonName" />
 
-        <EditText
-            android:id="@+id/editPhone"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:autofillHints="phone"
-            android:hint="Phone number"
-            android:inputType="phone"
-            android:minHeight="48dp" />
+            <TextView
+                style="@style/FieldLabel"
+                android:labelFor="@id/editDateOfBirth"
+                android:text="Date of birth" />
 
-        <EditText
-            android:id="@+id/editUsername"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:autofillHints="username"
-            android:hint="Username"
-            android:inputType="text"
-            android:minHeight="48dp" />
+            <EditText
+                android:id="@+id/editDateOfBirth"
+                style="@style/FieldInput"
+                android:autofillHints="birthDateFull"
+                android:hint="MM/DD/YYYY"
+                android:inputType="date" />
 
-        <EditText
-            android:id="@+id/editPassword"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:autofillHints="newPassword"
-            android:hint="Password"
-            android:inputType="textPassword"
-            android:minHeight="48dp" />
+            <TextView
+                style="@style/FieldLabel"
+                android:labelFor="@id/editEmail"
+                android:text="Email" />
 
-        <EditText
-            android:id="@+id/editConfirmPassword"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:autofillHints="newPassword"
-            android:hint="Confirm password"
-            android:inputType="textPassword"
-            android:minHeight="48dp" />
+            <EditText
+                android:id="@+id/editEmail"
+                style="@style/FieldInput"
+                android:autofillHints="emailAddress"
+                android:hint="name@email.com"
+                android:inputType="textEmailAddress" />
 
-        <Button
-            android:id="@+id/buttonRegister"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Create account" />
+            <TextView
+                style="@style/FieldLabel"
+                android:labelFor="@id/editPhone"
+                android:text="Phone number" />
+
+            <EditText
+                android:id="@+id/editPhone"
+                style="@style/FieldInput"
+                android:autofillHints="phone"
+                android:hint="(555) 000-0000"
+                android:inputType="phone" />
+
+            <TextView
+                style="@style/FieldLabel"
+                android:labelFor="@id/editUsername"
+                android:text="Username" />
+
+            <EditText
+                android:id="@+id/editUsername"
+                style="@style/FieldInput"
+                android:autofillHints="username"
+                android:hint="Choose a username"
+                android:inputType="text" />
+
+            <TextView
+                style="@style/FieldLabel"
+                android:labelFor="@id/editPassword"
+                android:text="Password" />
+
+            <EditText
+                android:id="@+id/editPassword"
+                style="@style/FieldInput"
+                android:autofillHints="newPassword"
+                android:hint="At least 8 characters"
+                android:inputType="textPassword" />
+
+            <TextView
+                style="@style/FieldLabel"
+                android:labelFor="@id/editConfirmPassword"
+                android:text="Confirm password" />
+
+            <EditText
+                android:id="@+id/editConfirmPassword"
+                style="@style/FieldInput"
+                android:autofillHints="newPassword"
+                android:hint="Re-enter your password"
+                android:inputType="textPassword" />
+
+            <Button
+                android:id="@+id/buttonRegister"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="8dp"
+                android:text="Create account"
+                android:textAllCaps="false"
+                android:textColor="@color/white"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                app:backgroundTint="@color/navy"
+                app:cornerRadius="9dp" />
+        </LinearLayout>
 
         <Button
             android:id="@+id/buttonGoToLogin"
-            style="?android:attr/borderlessButtonStyle"
+            style="?attr/borderlessButtonStyle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Already have an account? Log in" />
+            android:layout_marginTop="12dp"
+            android:text="Already have an account? Log in"
+            android:textAllCaps="false"
+            android:textColor="@color/link_blue"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <!-- Footer text from the website -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="32dp"
+            android:gravity="center"
+            android:text="© 2026 Team 2 Online Banking Project\nCS 160 Academic Prototype"
+            android:textColor="@color/text_muted"
+            android:textSize="11sp" />
     </LinearLayout>
 </ScrollView>

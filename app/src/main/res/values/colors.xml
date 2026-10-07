@@ -1,5 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Default colors from the Android Studio template -->
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Team 2 Bank colors, taken from the website's index.css -->
+    <color name="page_bg">#F4F7FB</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="card_border">#E0E6EF</color>
+    <color name="input_border">#CBD6E5</color>
+    <color name="navy">#123B72</color>
+    <color name="link_blue">#1C5CA7</color>
+    <color name="label_blue">#2B67AE</color>
+    <color name="text_dark">#17233D</color>
+    <color name="text_gray">#748094</color>
+    <color name="text_muted">#8B96A8</color>
 </resources>

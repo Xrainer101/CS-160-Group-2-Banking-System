@@ -1,3 +1,17 @@
 <resources>
     <string name="app_name">Online Banking - CS160</string>
+    <string name="bankName">CS 160 Bank</string>
+    <string name="createAccount">Create your account</string>
+    <string name="fullName">Full name</string>
+    <string name="birthDate">Date of birth (MM/DD/YYYY)</string>
+    <string name="email">Email</string>
+    <string name="phoneNumber">Phone number</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="passwordConfirmation">Confirm password</string>
+    <string name="accountCreation">Create account</string>
+    <string name="accountAlready">Already have an account? Log in</string>
+    <string name="registerAccount">No account? Register</string>
+    <string name="loginButton">Log in</string>
+    <string name="loginAccount">Log in to your account</string>
 </resources>

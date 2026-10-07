@@ -1,66 +1,169 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Login screen -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/page_bg"
     android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="20dp">
+
+        <!-- Brand: "T2" badge + Team 2 Bank / Online Banking -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="42dp"
+                android:layout_height="42dp"
+                android:background="@drawable/bg_brand"
+                android:gravity="center"
+                android:text="T2"
+                android:textColor="@color/white"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="11dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Team 2 Bank"
+                    android:textColor="@color/text_dark"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Online Banking"
+                    android:textColor="@color/text_muted"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Heading -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="40dp"
+            android:layout_marginBottom="6dp"
+            android:letterSpacing="0.12"
+            android:text="WELCOME BACK"
+            android:textColor="@color/label_blue"
+            android:textSize="11sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/textTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="32dp"
-            android:gravity="center"
-            android:text="CS 160 Bank"
-            android:textSize="24sp"
+            android:text="Log in to your account"
+            android:textColor="@color/text_dark"
+            android:textSize="26sp"
             android:textStyle="bold" />
 
         <TextView
             android:id="@+id/textSubtitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="32dp"
-            android:gravity="center"
-            android:text="Log in to your account" />
+            android:layout_marginTop="6dp"
+            android:text="Check your balances, move money and pay bills."
+            android:textColor="@color/text_gray"
+            android:textSize="14sp" />
 
-        <EditText
-            android:id="@+id/editUsername"
+        <!-- Form card -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:autofillHints="username"
-            android:hint="Username"
-            android:inputType="text"
-            android:minHeight="48dp" />
+            android:layout_marginTop="24dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="22dp">
 
-        <EditText
-            android:id="@+id/editPassword"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:autofillHints="password"
-            android:hint="Password"
-            android:inputType="textPassword"
-            android:minHeight="48dp" />
+            <TextView
+                style="@style/FieldLabel"
+                android:labelFor="@id/editUsername"
+                android:text="Username" />
 
-        <Button
-            android:id="@+id/buttonLogin"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Log in" />
+            <EditText
+                android:id="@+id/editUsername"
+                style="@style/FieldInput"
+                android:autofillHints="username"
+                android:hint="Enter your username"
+                android:inputType="text" />
+
+            <TextView
+                style="@style/FieldLabel"
+                android:labelFor="@id/editPassword"
+                android:text="Password" />
+
+            <EditText
+                android:id="@+id/editPassword"
+                style="@style/FieldInput"
+                android:layout_marginBottom="4dp"
+                android:autofillHints="password"
+                android:hint="Enter your password"
+                android:inputType="textPassword" />
+
+            <TextView
+                android:id="@+id/textForgotPassword"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:text="Forgot password?"
+                android:textColor="@color/link_blue"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/buttonLogin"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="12dp"
+                android:text="Log in"
+                android:textAllCaps="false"
+                android:textColor="@color/white"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                app:backgroundTint="@color/navy"
+                app:cornerRadius="9dp" />
+        </LinearLayout>
 
         <Button
             android:id="@+id/buttonGoToRegister"
-            style="?android:attr/borderlessButtonStyle"
+            style="?attr/borderlessButtonStyle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="#0C447C"
-            android:text="No account? Register" />
+            android:layout_marginTop="12dp"
+            android:text="Don't have an account? Register"
+            android:textAllCaps="false"
+            android:textColor="@color/link_blue"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <!-- Footer text from the website -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="32dp"
+            android:gravity="center"
+            android:text="© 2026 Team 2 Online Banking Project\nCS 160 Academic Prototype"
+            android:textColor="@color/text_muted"
+            android:textSize="11sp" />
     </LinearLayout>
 </ScrollView>
