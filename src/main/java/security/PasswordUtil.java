@@ -19,7 +19,7 @@ public class PasswordUtil {
         System.out.println("Hash: ");
         System.out.println(hash);
 
-        System.out.println(verifyPassword("Password123", hash));
-        System.out.println(verifyPassword("WrongPassword", hash));
+        System.out.println(verifyPassword("Password123", hash)); // Should return true
+        System.out.println(verifyPassword("WrongPassword", hash)); // Should return false
     }
 }
