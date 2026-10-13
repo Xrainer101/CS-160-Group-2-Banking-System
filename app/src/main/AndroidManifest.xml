@@ -18,6 +18,11 @@
             android:name=".RegisterActivity"
             android:exported="false" />
 
+        <!-- Home screen (shown after a successful login) -->
+        <activity
+            android:name=".HomeActivity"
+            android:exported="false" />
+
         <!-- Login screen: the first screen when the app opens -->
         <activity
             android:name=".MainActivity"
