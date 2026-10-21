@@ -118,6 +118,38 @@ public class DatabaseManager {
         }
     }
 
+    /**
+     * Deletes a user profile by username. 
+     * Re-enables foreign key constraints so ON DELETE CASCADE automatically 
+     * removes any bank accounts linked to this user.
+     */
+    public static boolean deleteUser(String username) {
+        String sql = "DELETE FROM users WHERE username = ?";
+
+        try (Connection conn = DriverManager.getConnection(DB_URL)) {
+
+            // Enable foreign keys so linked bank_accounts are automatically cleaned up
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("PRAGMA foreign_keys = ON;");
+            }
+
+            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                pstmt.setString(1, username);
+                int rowsDeleted = pstmt.executeUpdate();
+
+                if (rowsDeleted > 0) {
+                    System.out.println("User '" + username + "' and all linked bank accounts were deleted successfully.");
+                    return true;
+                } else {
+                    System.out.println("No user found with username: " + username);
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println("Error deleting user: " + e.getMessage());
+        }
+        return false;
+    }
+
     // ---------------- Bank Accounts ------------------
 
     /**
@@ -247,6 +279,30 @@ public class DatabaseManager {
         }
     }
 
+    /**
+     * Deletes a specific bank account using its account number.
+     */
+    public static boolean deleteBankAccount(String accountNumber) {
+        String sql = "DELETE FROM bank_accounts WHERE account_number = ?";
+
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, accountNumber);
+            int rowsDeleted = pstmt.executeUpdate();
+
+            if (rowsDeleted > 0) {
+                System.out.println("Bank account #" + accountNumber + " deleted successfully.");
+                return true;
+            } else {
+                System.out.println("No bank account found with account number: " + accountNumber);
+            }
+        } catch (SQLException e) {
+            System.out.println("Error deleting bank account: " + e.getMessage());
+        }
+        return false;
+    }
+
     // Main method to test it out
     public static void main(String[] args) {
         initializeDatabase();
@@ -264,5 +320,11 @@ public class DatabaseManager {
         createBankAccount(1, "savings", 1000.00);
 
         getBankAccountsByUsername("john_doe");
+
+        // Test deleting a single bank account
+        //deleteBankAccount("1029384756");
+
+        // Test deleting a user (and cascading to their remaining accounts)
+        //deleteUser("john_doe");
     }
 }
