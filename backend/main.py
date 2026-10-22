@@ -73,6 +73,9 @@ def initialize_database():
 # Startup event to initialize the database when the application starts
 @app.on_event("startup")
 def startup():
+    from java_database import initialize_java_database; 
+    initialize_java_database()
+
     initialize_database()
 
 # Password Hashing

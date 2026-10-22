@@ -9,8 +9,8 @@ import java.sql.Statement;
 
 public class DatabaseManager {
     // This will create a file named "bank.db" in your project root directory
-    private static 
-    final String DB_URL = "jdbc:sqlite:bank.db";
+    private static final String DB_URL =
+        "jdbc:sqlite:" + System.getProperty("bank.db.path", "bank.db");
 
     // 1. Initialize Database and Tables
     public static void initializeDatabase() {
