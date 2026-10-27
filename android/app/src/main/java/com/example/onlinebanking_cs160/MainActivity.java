@@ -80,7 +80,7 @@ public class MainActivity extends AppCompatActivity {
                 binding.buttonLogin.setEnabled(true);
                 switch (result.status) {
                     case SUCCESS:
-                        session.login(result.user.getUserId());
+                        session.login(result.user.getUserId(), result.previousLogin);
                         goToHome();
                         break;
 
