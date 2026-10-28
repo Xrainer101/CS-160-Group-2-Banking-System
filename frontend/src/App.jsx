@@ -40,57 +40,171 @@ function AppContent() {
     navigate('/signin');
   }
   function transfer(fromId, toId, amount) {
-    const from = accounts.find(a => a.id === fromId);
-    const to = accounts.find(a => a.id === toId);
-    if (!from || !to || fromId === toId || !Number.isFinite(amount) || amount <= 0) return 'Enter a valid transfer.';
+    const from = accounts.find((a) => a.id === fromId);
+    const to = accounts.find((a) => a.id === toId);
+    if (
+      !from ||
+      !to ||
+      fromId === toId ||
+      !Number.isFinite(amount) ||
+      amount <= 0
+    )
+      return 'Enter a valid transfer.';
     if (amount > from.available) return 'Insufficient available funds.';
-    setAccounts(prev => prev.map(a => {
-      if (a.id === fromId) return { ...a, balance: a.balance - amount, available: a.available - amount };
-      if (a.id === toId) return { ...a, balance: a.balance + amount, available: a.available + amount };
-      return a;
-    }));
-    const date = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    setTransactions(prev => [
-      { id: Date.now(), name: `Transfer to ${to.type}`, category: 'Transfer', date, amount: -amount, account: fromId, icon: 'ArrowLeftRight' },
-      { id: Date.now() + 1, name: `Transfer from ${from.type}`, category: 'Transfer', date, amount, account: toId, icon: 'ArrowLeftRight' },
-      ...prev
+    setAccounts((prev) =>
+      prev.map((a) => {
+        if (a.id === fromId)
+          return {
+            ...a,
+            balance: a.balance - amount,
+            available: a.available - amount,
+          };
+        if (a.id === toId)
+          return {
+            ...a,
+            balance: a.balance + amount,
+            available: a.available + amount,
+          };
+        return a;
+      }),
+    );
+    const date = new Date().toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    setTransactions((prev) => [
+      {
+        id: Date.now(),
+        name: `Transfer to ${to.type}`,
+        category: 'Transfer',
+        date,
+        amount: -amount,
+        account: fromId,
+        icon: 'ArrowLeftRight',
+      },
+      {
+        id: Date.now() + 1,
+        name: `Transfer from ${from.type}`,
+        category: 'Transfer',
+        date,
+        amount,
+        account: toId,
+        icon: 'ArrowLeftRight',
+      },
+      ...prev,
     ]);
     notify('Demo transfer completed. No real money was moved.');
     return '';
   }
   function schedulePayment(name, amount) {
-    setPayments(prev => [...prev, { id: Date.now(), name, amount, date: 'Scheduled' }]);
+    setPayments((prev) => [
+      ...prev,
+      { id: Date.now(), name, amount, date: 'Scheduled' },
+    ]);
     notify('Demo payment added to your upcoming payments.');
   }
-  const shared = { user, accounts, transactions, payments, frozen, setFrozen, notify, transfer, schedulePayment };
+  const shared = {
+    user,
+    accounts,
+    transactions,
+    payments,
+    frozen,
+    setFrozen,
+    notify,
+    transfer,
+    schedulePayment,
+  };
   return (
     <>
-      {user && <Navbar user={user} onMenu={() => setMenuOpen(v => !v)} onSignOut={signOut} />}
-      {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss">×</button></div>}
+      {user && (
+        <Navbar
+          user={user}
+          onMenu={() => setMenuOpen((v) => !v)}
+          onSignOut={signOut}
+        />
+      )}
+      {notice && (
+        <div className="toast" role="status">
+          {notice}
+          <button onClick={() => setNotice('')} aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
       <Routes>
-        <Route path="/signin" element={user ? <Navigate to="/dashboard" replace /> : <SignIn onSignIn={signIn} />} />
-        <Route path="/signup" element={user ? <Navigate to="/dashboard" replace /> : <SignUp onSignIn={signIn} />} />
-        <Route path="/*" element={user ? (
-          <div className="app-shell">
-            <Sidebar open={menuOpen} close={() => setMenuOpen(false)} />
-            <div className="app-content">
-              <main className="main-content">
-                <Routes>
-                  <Route path="/dashboard" element={<Dashboard {...shared} />} />
-                  <Route path="/accounts" element={<Accounts {...shared} />} />
-                  <Route path="/transactions" element={<Transactions {...shared} />} />
-                  <Route path="/transfers" element={<Transfers {...shared} />} />
-                  <Route path="/cards" element={<Cards {...shared} />} />
-                  <Route path="/settings" element={<Settings {...shared} />} />
-                  <Route path="*" element={<Navigate to="/dashboard" replace />} />
-                </Routes>
-              </main>
-              <Footer />
-            </div>
-          </div>
-        ) : <Navigate to="/signin" replace />} />
+        <Route
+          path="/signin"
+          element={
+            user ? (
+              <Navigate to="/dashboard" replace />
+            ) : (
+              <SignIn onSignIn={signIn} />
+            )
+          }
+        />
+        <Route
+          path="/signup"
+          element={
+            user ? (
+              <Navigate to="/dashboard" replace />
+            ) : (
+              <SignUp onSignIn={signIn} />
+            )
+          }
+        />
+        <Route
+          path="/*"
+          element={
+            user ? (
+              <div className="app-shell">
+                <Sidebar open={menuOpen} close={() => setMenuOpen(false)} />
+                <div className="app-content">
+                  <main className="main-content">
+                    <Routes>
+                      <Route
+                        path="/dashboard"
+                        element={<Dashboard {...shared} />}
+                      />
+                      <Route
+                        path="/accounts"
+                        element={<Accounts {...shared} />}
+                      />
+                      <Route
+                        path="/transactions"
+                        element={<Transactions {...shared} />}
+                      />
+                      <Route
+                        path="/transfers"
+                        element={<Transfers {...shared} />}
+                      />
+                      <Route path="/cards" element={<Cards {...shared} />} />
+                      <Route
+                        path="/settings"
+                        element={<Settings {...shared} />}
+                      />
+                      <Route
+                        path="*"
+                        element={<Navigate to="/dashboard" replace />}
+                      />
+                    </Routes>
+                  </main>
+                  <Footer />
+                </div>
+              </div>
+            ) : (
+              <Navigate to="/signin" replace />
+            )
+          }
+        />
       </Routes>
     </>
   );
 }
-export default function App() { return <BrowserRouter><AppContent /></BrowserRouter>; }
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
+    </BrowserRouter>
+  );
+}
