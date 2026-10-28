@@ -1,22 +1,3 @@
-function WelcomeSection() {
-  return (
-    <section className="welcome-section">
-      <div className="dashboard-container">
-        <div>
-          <p className="welcome-label">OVERVIEW</p>
-          <h1>Welcome back, Sachi.</h1>
-          <p className="welcome-text">
-            Here's a quick look at your accounts and recent banking activity.
-          </p>
-        </div>
-
-        <div className="last-login">
-          <span>Last login</span>
-          <strong>Today, 4:18 PM</strong>
-        </div>
-      </div>
-    </section>
-  );
+export default function WelcomeSection({ user }) {
+  return <div className="welcome-section"><div><span className="eyebrow">ACCOUNT OVERVIEW</span><h1>Welcome back, {user.name} <span className="wave">✦</span></h1><p>Here's what's happening with your money today.</p></div><span className="date-label">{new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})}</span></div>;
 }
-
-export default WelcomeSection;

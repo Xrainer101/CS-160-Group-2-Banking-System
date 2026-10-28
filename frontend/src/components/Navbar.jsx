@@ -1,39 +1,7 @@
-function Navbar() {
-  return (
-    <header className="navbar">
-      <div className="navbar-container">
-        <div className="brand">
-          <div className="brand-icon">T2</div>
-
-          <div>
-            <h2>Team 2 Bank</h2>
-            <span>Online Banking</span>
-          </div>
-        </div>
-
-        <nav className="nav-links">
-          <a href="#">Home</a>
-          <a href="#">Accounts</a>
-          <a href="#">Transfers</a>
-          <a href="#">Bill Pay</a>
-          <a href="#">ATM Locator</a>
-        </nav>
-
-        <div className="nav-user">
-          <button className="notification-btn">🔔</button>
-
-          <div className="user-info">
-            <div className="user-avatar">SK</div>
-
-            <div>
-              <strong>Sachi</strong>
-              <span>Customer</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
-  );
+import { Bell, Menu, LogOut, Landmark } from 'lucide-react';
+export default function Navbar({ user, onMenu, onSignOut }) {
+  return <header className="topbar">
+    <div className="topbar-brand"><button className="icon-button mobile-menu" onClick={onMenu} aria-label="Toggle navigation"><Menu size={20}/></button><span className="logo-mark"><Landmark size={21}/></span><div><strong>Team 2 Bank</strong><small>Digital Banking</small></div></div>
+    <div className="topbar-right"><span className="demo-pill">DEMO MODE</span><button className="icon-button" aria-label="Notifications" title="Demo notifications"><Bell size={19}/></button><span className="avatar">{user.name.slice(0,1)}</span><span className="topbar-name">{user.name}</span><button className="icon-button" title="Sign out" aria-label="Sign out" onClick={onSignOut}><LogOut size={19}/></button></div>
+  </header>;
 }
-
-export default Navbar;
