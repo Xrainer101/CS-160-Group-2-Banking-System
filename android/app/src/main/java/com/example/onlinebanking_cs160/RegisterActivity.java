@@ -20,14 +20,11 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import database.DatabaseManager;
-
 // Registration screen
 public class RegisterActivity extends AppCompatActivity {
     private static final int MIN_PASSWORD_LENGTH = 8;
 
     private final ExecutorService executorService = Executors.newSingleThreadExecutor();
-    private DatabaseManager databaseManager;
 
     private EditText editFullName;
     private EditText editDateOfBirth;
@@ -50,8 +47,6 @@ public class RegisterActivity extends AppCompatActivity {
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
             return insets;
         });
-
-        databaseManager = DatabaseManager.getInstance(this);
 
         editFullName = findViewById(R.id.editFullName);
         editDateOfBirth = findViewById(R.id.editDateOfBirth);
@@ -131,33 +126,39 @@ public class RegisterActivity extends AppCompatActivity {
         // ---- Save to the database on a background thread ----
         buttonRegister.setEnabled(false);
         executorService.execute(() -> {
-            DatabaseManager.RegisterResult result = databaseManager.registerUser(
-                    username, firstName, lastName, dateOfBirth, email, phoneNumber, password);
-
-            runOnUiThread(() -> {
-                buttonRegister.setEnabled(true);
-                switch (result) {
-                    case SUCCESS:
-                        Toast.makeText(this, "Account created! You can now log in.", Toast.LENGTH_LONG).show();
-                        finish(); // back to the login screen
-                        break;
-                    case USERNAME_TAKEN:
-                        editUsername.setError("That username is already taken");
-                        editUsername.requestFocus();
-                        break;
-                    case EMAIL_TAKEN:
-                        editEmail.setError("An account with this email already exists");
-                        editEmail.requestFocus();
-                        break;
-                    case PHONE_TAKEN:
-                        editPhone.setError("An account with this phone number already exists");
-                        editPhone.requestFocus();
-                        break;
-                    default:
+            try {
+                ApiClient.register(fullName,email,username,password,phoneNumber);
+            
+                runOnUiThread(() -> {
+                    buttonRegister.setEnabled(true);
+                    Toast.makeText(this, "Account created! You can now log in.", Toast.LENGTH_LONG).show();
+                            finish(); // back to the login screen
+                });
+            } catch (ApiClient.ApiException e) {
+                runOnUiThread(() -> {
+                    buttonRegister.setEnabled(true);
+                    String message = e.getMessage();
+                    
+                    if(message != null && message.contains("USERNAME_TAKEN")) {
+                            editUsername.setError("That username is already taken");
+                            editUsername.requestFocus();
+                    } else if (message != null && message.contains("EMAIL_TAKEN")) {
+                            editEmail.setError("An account with this email already exists");
+                            editEmail.requestFocus();
+                    } else if (message != null && message.contains("PHONE_TAKEN")) {
+                            editPhone.setError("An account with this phone number already exists");
+                            editPhone.requestFocus();
+                    } else {
                         Toast.makeText(this, "Something went wrong. Please try again.", Toast.LENGTH_SHORT).show();
-                        break;
-                }
-            });
+                    }
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    buttonRegister.setEnabled(true);
+                    Toast.makeText(this,"Couldn't connect to the backend.", Toast.LENGTH_SHORT).show();
+                });
+            }
+            
         });
     }
 
