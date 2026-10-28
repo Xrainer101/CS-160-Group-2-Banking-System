@@ -117,9 +117,11 @@ public class HomeActivity extends AppCompatActivity {
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 if (user == null) {
-                    // The saved session points to a user that no longer exists (e.g. the database was reset)
-                    session.logout();
-                    goToLogin();
+                    runOnUiThread(() -> {
+                        textWelcome.setText("Welcome back.");
+                        textAvatar.setText("U");
+                        showAccounts(java.util.Collections.emptyList());
+                    });
                     return;
                 }
                 currentUser = user;

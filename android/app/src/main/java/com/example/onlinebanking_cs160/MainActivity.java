@@ -2,7 +2,6 @@ package com.example.onlinebanking_cs160;
 
 import android.content.Intent;
 import android.os.Bundle;
-import android.text.format.DateFormat;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -15,12 +14,9 @@ import com.example.onlinebanking_cs160.databinding.ActivityMainBinding;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import database.DatabaseManager;
-
 // Login screen
 public class MainActivity extends AppCompatActivity {
     private ActivityMainBinding binding;
-    private DatabaseManager databaseManager;
     private SessionManager session;
     private final ExecutorService executorService = Executors.newSingleThreadExecutor();
 
@@ -29,7 +25,6 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
 
         session = new SessionManager(this);
-        databaseManager = DatabaseManager.getInstance(this);
 
         // Already logged in from last time? Skip the login screen.
         if (session.isLoggedIn()) {
@@ -74,38 +69,32 @@ public class MainActivity extends AppCompatActivity {
         // Check the database on a background thread (password hashing takes a moment)
         binding.buttonLogin.setEnabled(false);
         executorService.execute(() -> {
-            DatabaseManager.LoginResult result = databaseManager.loginUser(username, password);
+            try {
+                String token = ApiClient.login(username, password); // calls backend login method from Android
+                runOnUiThread(() -> {
+                    binding.buttonLogin.setEnabled(true);
+                    // saves the backend JWT token
+                    session.login(token);
+                    goToHome();
+                });
+            } catch (ApiClient.ApiException e) {
+                runOnUiThread(() -> {
+                    binding.buttonLogin.setEnabled(true);
 
-            runOnUiThread(() -> {
-                binding.buttonLogin.setEnabled(true);
-                switch (result.status) {
-                    case SUCCESS:
-                        session.login(result.user.getUserId(), result.previousLogin);
-                        goToHome();
-                        break;
-
-                    case LOCKED:
-                        String time = DateFormat.getTimeFormat(this).format(new java.util.Date(result.lockedUntil));
-                        Toast.makeText(this,
-                                "Too many failed attempts. Try again after " + time + ".",
-                                Toast.LENGTH_LONG).show();
-                        binding.editPassword.setText("");
-                        break;
-
-                    case INVALID_CREDENTIALS:
-                    default:
-                        String message = "Incorrect username or password.";
-                        if (result.attemptsLeft > 0 && result.attemptsLeft <= 2) {
-                            message += " " + result.attemptsLeft
-                                    + (result.attemptsLeft == 1 ? " attempt" : " attempts")
-                                    + " left before your account is locked.";
-                        }
-                        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-                        binding.editPassword.setText("");
-                        binding.editPassword.requestFocus();
-                        break;
-                }
-            });
+                    if (e.getStatusCode() == 423){
+                        Toast.makeText(this,"Account temporarily locked.",Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(this,"Incorrect username or password.",Toast.LENGTH_LONG).show();
+                    }
+                    binding.editPassword.setText("");
+                    binding.editPassword.requestFocus();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    binding.buttonLogin.setEnabled(true);
+                    Toast.makeText(this,"Could not connect to the backend.",Toast.LENGTH_LONG).show();
+                });
+            }
         });
     }
 

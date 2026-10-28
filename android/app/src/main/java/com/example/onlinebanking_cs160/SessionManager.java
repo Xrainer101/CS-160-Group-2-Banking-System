@@ -8,6 +8,7 @@ public class SessionManager {
     private static final String PREFS_NAME = "session";
     private static final String KEY_USER_ID = "user_id";
     private static final String KEY_PREVIOUS_LOGIN = "previous_login";
+    private static final String KEY_TOKEN = "access_token";
 
     private final SharedPreferences prefs;
 
@@ -19,8 +20,9 @@ public class SessionManager {
         prefs.edit().putLong(KEY_USER_ID, userId).putLong(KEY_PREVIOUS_LOGIN, previousLogin).apply();
     }
 
+    // checks whether a backend authentication token is saved
     public boolean isLoggedIn() {
-        return getUserId() != -1;
+        return getToken() != null;
     }
 
     // logged in user's id, or -1 if nobody is logged in
@@ -35,5 +37,15 @@ public class SessionManager {
 
     public void logout() {
         prefs.edit().clear().apply();
+    }
+
+    // saves the backend login token so the app can remember the session
+    public void login(String token) {
+        prefs.edit().putString(KEY_TOKEN, token).apply();
+    }
+
+    // returns the backend token or null if nobody is logged in
+    public String getToken() {
+        return prefs.getString(KEY_TOKEN, null);
     }
 }
