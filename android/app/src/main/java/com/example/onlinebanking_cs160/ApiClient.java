@@ -57,6 +57,45 @@ public final class ApiClient {
         throw new ApiException(statusCode, message);
     }
 
+    // Added a method
+    public static void register(
+        String name,
+        String email,
+        String username,
+        String password,
+        String phoneNumber
+    ) throws Exception {
+        URL url = new URL(BASE_URL + "/api/auth/register");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+
+        connection.setRequestMethod("POST");
+        connection.setRequestProperty("Content-Type","application/json");
+        connection.setDoOutput(true);
+
+        JSONObject requestBody = new JSONObject();
+        requestBody.put("name",name);
+        requestBody.put("email",email);
+        requestBody.put("username",username);
+        requestBody.put("password",password);
+        requestBody.put("phone_number",phoneNumber);
+
+        try (OutputStream outputStream = connection.getOutputStream()) {
+            outputStream.write(requestBody.toString().getBytes(StandardCharsets.UTF_8));
+        }
+
+        int statusCode = connection.getResponseCode();
+
+        if (statusCode < 200 || statusCode >= 300) {
+            InputStream errorStream = connection.getErrorStream();
+            String responseText = readResponse(errorStream);
+            JSONObject responseJson = new JSONObject(responseText);
+
+            String message = responseJson.optString("detail","Registration failed");
+            throw new ApiException(statusCode, message);
+        }
+        connection.disconnect();
+    }
+
     private static String readResponse(InputStream inputStream)
             throws Exception {
         StringBuilder response = new StringBuilder();
