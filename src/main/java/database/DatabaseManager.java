@@ -7,6 +7,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 
 public class DatabaseManager {
     // This will create a file named "bank.db" in your project root directory
@@ -35,6 +36,8 @@ public class DatabaseManager {
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)";
             stmt.execute(createUsersTable);
 
+            System.out.println("Users table created successfully.");
+
             // Create Bank Accounts Table
             String createAccountsTable = "CREATE TABLE IF NOT EXISTS bank_accounts (" +
                 "account_id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -48,6 +51,21 @@ public class DatabaseManager {
                 "closed_at DATETIME DEFAULT NULL," +
                 "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE);";
             stmt.execute(createAccountsTable);
+
+            System.out.println("Accounts table created successfully.");
+
+            // Create Transactions Table
+            String createTransactionsTable = "CREATE TABLE IF NOT EXISTS transactions (" +
+                "transaction_id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "account_number TEXT NOT NULL," +
+                "transaction_type TEXT NOT NULL CHECK(transaction_type IN ('deposit', 'withdrawal', 'transfer_in', 'transfer_out'))," +
+                "amount REAL NOT NULL," +
+                "related_account TEXT DEFAULT NULL," +
+                "timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "FOREIGN KEY (account_number) REFERENCES bank_accounts(account_number) ON DELETE CASCADE);";
+            stmt.execute(createTransactionsTable);
+
+            System.out.println("Transactions table created successfully.");
 
             System.out.println("Database and tables created successfully.");
 
@@ -198,38 +216,40 @@ public class DatabaseManager {
 
     /**
      * Creates and inserts a new bank account for an existing user.
+     * Returns account number on success
+     * Returns null on failure
      */
-    public static boolean createBankAccount(int userId, String accountType, double initialDeposit) {
-    String insertSql = "INSERT INTO bank_accounts (user_id, account_number, routing_number, account_type, balance) " +
-                       "VALUES (?, ?, ?, ?, ?)";
+    public static String createBankAccount(int userId, String accountType, double initialDeposit) {
+        String insertSql = "INSERT INTO bank_accounts (user_id, account_number, routing_number, account_type, balance) " +
+                        "VALUES (?, ?, ?, ?, ?)";
 
-    try (Connection conn = DriverManager.getConnection(DB_URL)) {
+        try (Connection conn = DriverManager.getConnection(DB_URL)) {
 
-        // Unique 10-digit account number for the customer
-        String accountNumber = generateUniqueAccountNumber(conn); 
+            // Unique 10-digit account number for the customer
+            String accountNumber = generateUniqueAccountNumber(conn); 
 
-        try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
-            pstmt.setInt(1, userId);
-            pstmt.setString(2, accountNumber);
-            pstmt.setString(3, BANK_ROUTING_NUMBER); // Use the static bank routing number
-            pstmt.setString(4, accountType.toLowerCase());
-            pstmt.setDouble(5, initialDeposit);
+            try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
+                pstmt.setInt(1, userId);
+                pstmt.setString(2, accountNumber);
+                pstmt.setString(3, BANK_ROUTING_NUMBER); // Use the static bank routing number
+                pstmt.setString(4, accountType.toLowerCase());
+                pstmt.setDouble(5, initialDeposit);
 
-            int rowsInserted = pstmt.executeUpdate();
-            if (rowsInserted > 0) {
-                System.out.println("Account created! User ID: " + userId + 
-                                   " | Acc #: " + accountNumber + 
-                                   " | Routing #: " + BANK_ROUTING_NUMBER + 
-                                   " | Type: " + accountType + 
-                                   " | Balance: $" + String.format("%.2f", initialDeposit));
-                return true;
+                int rowsInserted = pstmt.executeUpdate();
+                if (rowsInserted > 0) {
+                    System.out.println("Account created! User ID: " + userId + 
+                                    " | Acc #: " + accountNumber + 
+                                    " | Routing #: " + BANK_ROUTING_NUMBER + 
+                                    " | Type: " + accountType + 
+                                    " | Balance: $" + String.format("%.2f", initialDeposit));
+                    return accountNumber;
+                }
             }
+        } catch (SQLException e) {
+            System.out.println("Failed to create bank account: " + e.getMessage());
         }
-    } catch (SQLException e) {
-        System.out.println("Failed to create bank account: " + e.getMessage());
+        return null;
     }
-    return false;
-}
 
     /**
      * Searches for and displays all bank accounts belonging to a given username.
@@ -279,6 +299,29 @@ public class DatabaseManager {
         }
     }
 
+    public static boolean closeBankAccount(String accountNumber) {
+        String sql = "UPDATE bank_accounts " +
+                 "SET status = 'closed', closed_at = datetime('now') " +
+                 "WHERE account_number = ? AND status != 'closed'";
+
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+            PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, accountNumber);
+            int rowsUpdated = pstmt.executeUpdate();
+
+            if (rowsUpdated > 0) {
+                System.out.println("Bank account #" + accountNumber + " has been successfully closed.");
+                return true;
+            } else {
+                System.out.println("Account closure failed: #" + accountNumber + " not found or already closed.");
+            }
+        } catch (SQLException e) {
+            System.out.println("Error closing bank account: " + e.getMessage());
+        }
+        return false;
+    }
+
     /**
      * Deletes a specific bank account using its account number.
      */
@@ -303,6 +346,169 @@ public class DatabaseManager {
         return false;
     }
 
+    // ------------------- Transactions --------------------
+
+    /**
+     * Private helper to log a transaction record on an active connection.
+     */
+    private static void logTransaction(Connection conn, String accountNumber, String type, double amount, String relatedAccount) throws SQLException {
+        String sql = "INSERT INTO transactions (account_number, transaction_type, amount, related_account) VALUES (?, ?, ?, ?)";
+        
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, accountNumber);
+            pstmt.setString(2, type);
+            pstmt.setDouble(3, amount);
+            
+            if (relatedAccount != null) {
+                pstmt.setString(4, relatedAccount);
+            } else {
+                pstmt.setNull(4, Types.VARCHAR); // Handles standard deposits/withdrawals
+            }
+            
+            pstmt.executeUpdate();
+        }
+    }
+
+    /**
+     * Private helper to process a deposit on an active connection.
+     */
+    private static void processDeposit(Connection conn, String accountNumber, double amount) throws SQLException {
+        if (amount <= 0) {
+            throw new SQLException("Deposit amount must be greater than zero.");
+        }
+
+        // Verify account exists and is active
+        String checkSql = "SELECT status FROM bank_accounts WHERE account_number = ?";
+        try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
+            checkStmt.setString(1, accountNumber);
+            try (ResultSet rs = checkStmt.executeQuery()) {
+                if (!rs.next()) throw new SQLException("Account #" + accountNumber + " does not exist.");
+                if (!"active".equals(rs.getString("status"))) {
+                    throw new SQLException("Account #" + accountNumber + " is " + rs.getString("status") + ".");
+                }
+            }
+        }
+
+        // Add funds
+        String updateSql = "UPDATE bank_accounts SET balance = balance + ? WHERE account_number = ?";
+        try (PreparedStatement updateStmt = conn.prepareStatement(updateSql)) {
+            updateStmt.setDouble(1, amount);
+            updateStmt.setString(2, accountNumber);
+            updateStmt.executeUpdate();
+        }
+    }
+
+    /**
+     * Private helper to process a withdrawal on an active connection.
+     */
+    private static void processWithdrawal(Connection conn, String accountNumber, double amount) throws SQLException {
+        if (amount <= 0) {
+            throw new SQLException("Withdrawal amount must be greater than zero.");
+        }
+
+        // Verify account exists, is active, and has sufficient funds
+        String checkSql = "SELECT balance, status FROM bank_accounts WHERE account_number = ?";
+        try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
+            checkStmt.setString(1, accountNumber);
+            try (ResultSet rs = checkStmt.executeQuery()) {
+                if (!rs.next()) throw new SQLException("Account #" + accountNumber + " does not exist.");
+                if (!"active".equals(rs.getString("status"))) {
+                    throw new SQLException("Account #" + accountNumber + " is " + rs.getString("status") + ".");
+                }
+                if (rs.getDouble("balance") < amount) {
+                    throw new SQLException("Insufficient funds in account #" + accountNumber + ".");
+                }
+            }
+        }
+
+        // Deduct funds
+        String updateSql = "UPDATE bank_accounts SET balance = balance - ? WHERE account_number = ?";
+        try (PreparedStatement updateStmt = conn.prepareStatement(updateSql)) {
+            updateStmt.setDouble(1, amount);
+            updateStmt.setString(2, accountNumber);
+            updateStmt.executeUpdate();
+        }
+    }
+
+    /**
+     * Public method to deposit money into a single account.
+     */
+    public static boolean deposit(String accountNumber, double amount) {
+        try (Connection conn = DriverManager.getConnection(DB_URL)) {
+            conn.setAutoCommit(false); // START TRANSACTION
+            try {
+                processDeposit(conn, accountNumber, amount);
+                logTransaction(conn, accountNumber, "deposit", amount, null); // Log it
+
+                conn.commit(); // SAVE TRANSACTION
+                System.out.println("Successfully deposited $" + String.format("%.2f", amount) + " to #" + accountNumber);
+                return true;
+            } catch (SQLException e) {
+                conn.rollback(); // CANCEL TRANSACTION
+                System.out.println("Deposit failed: " + e.getMessage());
+            }
+        } catch (SQLException e) {
+            System.out.println("Database connection error: " + e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * Public method to withdraw money from a single account.
+     */
+    public static boolean withdraw(String accountNumber, double amount) {
+        try (Connection conn = DriverManager.getConnection(DB_URL)) {
+            conn.setAutoCommit(false); // START TRANSACTION
+            try {
+                processWithdrawal(conn, accountNumber, amount);
+                logTransaction(conn, accountNumber, "withdrawal", amount, null); // Log it
+
+                conn.commit(); // SAVE TRANSACTION
+                System.out.println("Successfully withdrew $" + String.format("%.2f", amount) + " from #" + accountNumber);
+                return true;
+            } catch (SQLException e) {
+                conn.rollback(); // CANCEL TRANSACTION
+                System.out.println("Withdrawal failed: " + e.getMessage());
+            }
+        } catch (SQLException e) {
+            System.out.println("Database connection error: " + e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * Public method to transfer money between two accounts atomically.
+     */
+    public static boolean transfer(String fromAccountNumber, String toAccountNumber, double amount) {
+        if (fromAccountNumber.equals(toAccountNumber)) {
+            System.out.println("Transfer failed: Cannot transfer money to the same account.");
+            return false;
+        }
+
+        try (Connection conn = DriverManager.getConnection(DB_URL)) {
+            conn.setAutoCommit(false); // START TRANSACTION
+            try {
+                // Execute both operations on the same connection.
+                processWithdrawal(conn, fromAccountNumber, amount); //  Withdrawal from source account
+                logTransaction(conn, fromAccountNumber, "transfer_out", amount, toAccountNumber);
+
+                processDeposit(conn, toAccountNumber, amount); // Deposit in target account
+                logTransaction(conn, toAccountNumber, "transfer_in", amount, fromAccountNumber);
+                
+                conn.commit(); // SAVE TRANSACTION
+                System.out.println("Successfully transferred $" + String.format("%.2f", amount) + 
+                                   " from #" + fromAccountNumber + " to #" + toAccountNumber);
+                return true;
+            } catch (SQLException e) {
+                conn.rollback(); // CANCEL TRANSACTION
+                System.out.println("Transfer failed (Transaction rolled back): " + e.getMessage());
+            }
+        } catch (SQLException e) {
+            System.out.println("Database connection error: " + e.getMessage());
+        }
+        return false;
+    }
+
     // Main method to test it out
     public static void main(String[] args) {
         initializeDatabase();
@@ -314,17 +520,36 @@ public class DatabaseManager {
         getUserByUsername("john_doe");
 
         // Example: Create a Checking account with a $250.00 initial deposit for User ID 1
-        createBankAccount(1, "checking", 250.00);
+        String testNum1 = createBankAccount(1, "checking", 250.00);
 
         // Example: Create a Savings account for the same user (User ID 1)
-        createBankAccount(1, "savings", 1000.00);
+        String testNum2 = createBankAccount(1, "savings", 1000.00);
 
         getBankAccountsByUsername("john_doe");
 
+        // Test deposit
+        deposit(testNum1, 50);
+
+        // Test withdraw
+        withdraw(testNum1, 25);
+
+        // Test transfer
+        transfer(testNum1, testNum2, 100);
+
+        getBankAccountsByUsername("john_doe");
+
+        // Test close
+        if (testNum1 != null) {
+            closeBankAccount(testNum1);
+        }
+
         // Test deleting a single bank account
-        //deleteBankAccount("1029384756");
+        deleteBankAccount(testNum1);
 
         // Test deleting a user (and cascading to their remaining accounts)
-        //deleteUser("john_doe");
+        deleteUser("john_doe");
+
+        // Test finding again
+        getBankAccountsByUsername("john_doe");
     }
 }
