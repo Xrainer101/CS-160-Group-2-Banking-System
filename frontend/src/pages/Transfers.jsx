@@ -1,9 +1,122 @@
 import { useState } from 'react';
 import { money } from '../data/mockData';
 export default function Transfers({ accounts, transfer, schedulePayment }) {
- const [from,setFrom]=useState('checking'),[to,setTo]=useState('savings'),[amount,setAmount]=useState(''),[error,setError]=useState('');
- const [payee,setPayee]=useState(''),[billAmount,setBillAmount]=useState(''),[billError,setBillError]=useState('');
- function submit(e){e.preventDefault();const result=transfer(from,to,Number(amount));setError(result);if(!result)setAmount('');}
- function bill(e){e.preventDefault();if(!payee.trim()||!Number.isFinite(Number(billAmount))||Number(billAmount)<=0){setBillError('Enter a payee and a valid amount.');return;}schedulePayment(payee.trim(),Number(billAmount));setBillError('');setPayee('');setBillAmount('');}
- return <><div className="page-heading"><span className="eyebrow">MOVE MONEY</span><h1>Transfers & payments</h1><p>Practice moving money between demo accounts.</p></div><div className="two-column"><section className="panel"><h2>Transfer between accounts</h2><p className="panel-subtitle">Changes appear instantly in this demo only.</p><form className="stacked-form" onSubmit={submit}><label>From account<select value={from} onChange={e=>setFrom(e.target.value)}>{accounts.map(a=><option key={a.id} value={a.id}>{a.type} — {money(a.available)} available</option>)}</select></label><label>To account<select value={to} onChange={e=>setTo(e.target.value)}>{accounts.map(a=><option key={a.id} value={a.id}>{a.type}</option>)}</select></label><label>Amount (USD)<input type="number" min="0.01" step="0.01" required placeholder="0.00" value={amount} onChange={e=>setAmount(e.target.value)}/></label>{error&&<p className="form-error" role="alert">{error}</p>}<button className="button button-primary">Transfer (demo)</button></form></section><section className="panel"><h2>Schedule a bill</h2><p className="panel-subtitle">Adds a simulated upcoming payment.</p><form className="stacked-form" onSubmit={bill}><label>Payee name<input value={payee} onChange={e=>setPayee(e.target.value)} required placeholder="e.g. Internet provider"/></label><label>Amount (USD)<input type="number" min="0.01" step="0.01" required value={billAmount} onChange={e=>setBillAmount(e.target.value)} placeholder="0.00"/></label>{billError&&<p className="form-error" role="alert">{billError}</p>}<button className="button button-primary">Schedule (demo)</button></form></section></div></>;
+  const [from, setFrom] = useState('checking'),
+    [to, setTo] = useState('savings'),
+    [amount, setAmount] = useState(''),
+    [error, setError] = useState('');
+  const [payee, setPayee] = useState(''),
+    [billAmount, setBillAmount] = useState(''),
+    [billError, setBillError] = useState('');
+  function submit(e) {
+    e.preventDefault();
+    const result = transfer(from, to, Number(amount));
+    setError(result);
+    if (!result) setAmount('');
+  }
+  function bill(e) {
+    e.preventDefault();
+    if (
+      !payee.trim() ||
+      !Number.isFinite(Number(billAmount)) ||
+      Number(billAmount) <= 0
+    ) {
+      setBillError('Enter a payee and a valid amount.');
+      return;
+    }
+    schedulePayment(payee.trim(), Number(billAmount));
+    setBillError('');
+    setPayee('');
+    setBillAmount('');
+  }
+  return (
+    <>
+      <div className="page-heading">
+        <span className="eyebrow">MOVE MONEY</span>
+        <h1>Transfers & payments</h1>
+        <p>Practice moving money between demo accounts.</p>
+      </div>
+      <div className="two-column">
+        <section className="panel">
+          <h2>Transfer between accounts</h2>
+          <p className="panel-subtitle">
+            Changes appear instantly in this demo only.
+          </p>
+          <form className="stacked-form" onSubmit={submit}>
+            <label>
+              From account
+              <select value={from} onChange={(e) => setFrom(e.target.value)}>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.type} — {money(a.available)} available
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              To account
+              <select value={to} onChange={(e) => setTo(e.target.value)}>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.type}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Amount (USD)
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                required
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </label>
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
+            <button className="button button-primary">Transfer (demo)</button>
+          </form>
+        </section>
+        <section className="panel">
+          <h2>Schedule a bill</h2>
+          <p className="panel-subtitle">Adds a simulated upcoming payment.</p>
+          <form className="stacked-form" onSubmit={bill}>
+            <label>
+              Payee name
+              <input
+                value={payee}
+                onChange={(e) => setPayee(e.target.value)}
+                required
+                placeholder="e.g. Internet provider"
+              />
+            </label>
+            <label>
+              Amount (USD)
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                required
+                value={billAmount}
+                onChange={(e) => setBillAmount(e.target.value)}
+                placeholder="0.00"
+              />
+            </label>
+            {billError && (
+              <p className="form-error" role="alert">
+                {billError}
+              </p>
+            )}
+            <button className="button button-primary">Schedule (demo)</button>
+          </form>
+        </section>
+      </div>
+    </>
+  );
 }

@@ -11,7 +11,8 @@ import java.sql.Types;
 
 public class DatabaseManager {
     // This will create a file named "bank.db" in your project root directory
-    private static final String DB_URL = "jdbc:sqlite:bank.db";
+    private static final String DB_URL =
+        "jdbc:sqlite:" + System.getProperty("bank.db.path", "bank.db");
     private static final SecureRandom RANDOM = new SecureRandom();
     // Static constant for your bank's routing number (must be 9 digits)
     public static final String BANK_ROUTING_NUMBER = "123456789";
@@ -70,7 +71,7 @@ public class DatabaseManager {
             System.out.println("Database and tables created successfully.");
 
         } catch (SQLException e) {
-            System.out.println("Database initialization error: " + e.getMessage());
+            throw new IllegalStateException("Database initialization failed", e);
         }
     }
 
