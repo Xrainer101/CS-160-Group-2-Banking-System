@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
@@ -31,9 +31,43 @@ function AppContent() {
     setNotice(message);
     window.setTimeout(() => setNotice(''), 4500);
   }
-  function signIn(email) {
-    setUser({ name: 'Sachi', email });
-    navigate('/dashboard');
+  function signIn(email, password) {
+
+    const handleSubmit = async (e) => {
+      try {
+        const response = await fetch("http://localhost:8000/api/auth/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            username: email,
+            password: password,
+            
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          // FastAPI returns 422 Unprocessable Entity if structural validation fails
+          throw new Error(data.detail ? JSON.stringify(data.detail) : "Validation failed");
+        }
+
+        setUser({ name: 'Sachi', email });
+        navigate('/dashboard');
+
+        // setResponseMessage(data.message);
+      } catch (err) {
+        // for now, log in even when fail
+        setUser({ name: 'Sachi', email });
+        navigate('/dashboard');
+      }
+    };
+
+    handleSubmit();
+
+    
+    
   }
   function signOut() {
     setUser(null);

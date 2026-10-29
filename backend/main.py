@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware  # Backend and frontend communication
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer   # Bearer Token authentication
 from pydantic import BaseModel, EmailStr, Field # Validate request data
+import jpype
 
 # Basic settings 
 DATABASE_PATH = os.getenv(
@@ -188,25 +189,25 @@ def register(
 # Login
 @app.post("/api/auth/login")
 def login(
-    request: LoginRequest,
-    database: sqlite3.Connection = Depends(get_database)
+    request: LoginRequest
 ):
+    print("hi")
     username = request.username.lower()
     # Find user in the database by username
-    user = database.execute(
-        "SELECT * FROM users WHERE username = ?",
-        (username,)
-    ).fetchone()
+    database_manager = jpype.JClass("database.DatabaseManager")
+
+    user = database_manager.getUserByUsername(username) # this doesn't work
     # If no user then 401 error
     if user is None:
         raise HTTPException(
             status_code=401,
             detail="Invalid username or password"
         )
-
+    
+    
     # Account lock check: If the user has failed too many login attempts, lock the account for a period of time
-    if user["lock_until"]:
-        lock_until = datetime.fromisoformat(user["lock_until"])
+    if user["lockout_until"]:
+        lock_until = datetime.fromisoformat(user["lockout_until"])
 
         if lock_until > datetime.now(timezone.utc):
             raise HTTPException(
@@ -222,51 +223,51 @@ def login(
 
     # If password wrong increment the failed attempts
     if not password_is_correct:
-        failed_attempts = user["failed_attempts"] + 1
-        # Lock the account if the failed attempts exceed the limit
-        if failed_attempts >= LOCKOUT_LIMIT:
-            lock_until = datetime.now(timezone.utc) + timedelta( # lockout time
-                minutes=LOCKOUT_MINUTES
-            )
-            database.execute(
-                """
-                UPDATE users
-                SET failed_attempts = 0, lock_until = ?
-                WHERE user_id = ?
-                """,
-                (lock_until.isoformat(), user["user_id"])
-            )
-            database.commit()
+        # failed_attempts = user["failed_attempts"] + 1
+        # # Lock the account if the failed attempts exceed the limit
+        # if failed_attempts >= LOCKOUT_LIMIT:
+        #     lock_until = datetime.now(timezone.utc) + timedelta( # lockout time
+        #         minutes=LOCKOUT_MINUTES
+        #     )
+        #     database.execute(
+        #         """
+        #         UPDATE users
+        #         SET failed_attempts = 0, lock_until = ?
+        #         WHERE user_id = ?
+        #         """,
+        #         (lock_until.isoformat(), user["user_id"])
+        #     )
+        #     database.commit()
 
-            raise HTTPException(
-                status_code=423,
-                detail="Account is temporarily locked"
-            )
-        # Failed password but not locked yet, update the failed attempts in the database
-        database.execute(
-            """
-            UPDATE users
-            SET failed_attempts = ?
-            WHERE user_id = ?
-            """,
-            (failed_attempts, user["user_id"])
-        )
-        database.commit()
+        #     raise HTTPException(
+        #         status_code=423,
+        #         detail="Account is temporarily locked"
+        #     )
+        # # Failed password but not locked yet, update the failed attempts in the database
+        # database.execute(
+        #     """
+        #     UPDATE users
+        #     SET failed_attempts = ?
+        #     WHERE user_id = ?
+        #     """,
+        #     (failed_attempts, user["user_id"])
+        # )
+        # database.commit()
 
         raise HTTPException(
             status_code=401,
             detail="Invalid username or password"
         )
     # Successful login, resets failure count and lockout status, and returns a JWT token
-    database.execute(
-        """
-        UPDATE users
-        SET failed_attempts = 0, lock_until = NULL
-        WHERE user_id = ?
-        """,
-        (user["user_id"],)
-    )
-    database.commit()
+    # database.execute(
+    #     """
+    #     UPDATE users
+    #     SET failed_attempts = 0, lock_until = NULL
+    #     WHERE user_id = ?
+    #     """,
+    #     (user["user_id"],)
+    # )
+    # database.commit()
 
     return {
         "access_token": create_token(user["user_id"]),

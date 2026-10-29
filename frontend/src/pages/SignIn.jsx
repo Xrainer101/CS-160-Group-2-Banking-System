@@ -7,7 +7,7 @@ export default function SignIn({ onSignIn }) {
     [show, setShow] = useState(false);
   function submit(e) {
     e.preventDefault();
-    if (email && password) onSignIn(email);
+    if (email && password) onSignIn(email, password);
   }
   return (
     <div className="auth-page">
@@ -37,7 +37,7 @@ export default function SignIn({ onSignIn }) {
             <label>
               Email address
               <input
-                type="email"
+                // type="email"
                 required
                 autoComplete="email"
                 value={email}
