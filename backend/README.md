@@ -4,6 +4,13 @@
 
 `python -m uvicorn main:app --reload --port 8000"`
 
+## Initialize the Java Database from Python
+
+From the project root, compile the Java code and copy its dependencies:
+
+`mvn compile dependency:copy-dependencies -DoutputDirectory=target/dependency`
+
+
 ## Testing Page FastAPI
 http://127.0.0.1:8000/docs
 
