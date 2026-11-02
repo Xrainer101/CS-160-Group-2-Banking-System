@@ -267,7 +267,15 @@ def login(
 
     return {
         "access_token": create_token(user["user_id"]),
-        "token_type": "bearer"
+        "token_type": "bearer",
+
+        # Login returns name and username
+        "user" : {
+            "user_id" : user["user_id"],
+            "name" : user["name"],
+            "email" : user["email"],
+            "username" : user["username"]
+        }
     }
 
 # Get the currently logged-in user

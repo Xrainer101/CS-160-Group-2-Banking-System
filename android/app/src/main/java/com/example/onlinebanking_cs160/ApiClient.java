@@ -16,7 +16,7 @@ public final class ApiClient {
     private ApiClient() {
     }
 
-    public static String login(String username, String password) throws Exception {
+    public static LoginResult login(String username, String password) throws Exception {
         URL url = new URL(BASE_URL + "/api/auth/login");
         HttpURLConnection connection =
                 (HttpURLConnection) url.openConnection();
@@ -46,7 +46,15 @@ public final class ApiClient {
         JSONObject responseJson = new JSONObject(responseText);
 
         if (statusCode >= 200 && statusCode < 300) {
-            return responseJson.getString("access_token");
+            JSONObject userJson = responseJson.getJSONObject("user");
+
+            return new LoginResult(
+                responseJson.getString("access_token"),
+                userJson.getLong("user_id"),
+                userJson.getString("name"),
+                userJson.getString("email"),
+                userJson.getString("username")
+            );    
         }
 
         String message = responseJson.optString(
@@ -57,7 +65,34 @@ public final class ApiClient {
         throw new ApiException(statusCode, message);
     }
 
-    // Added a method
+    // Gets the currently logged in user's profile from the backend
+    public static UserProfile getCurrentUser(String token) throws Exception {
+        URL url = new URL(BASE_URL + "/api/auth/me");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+
+        connection.setRequestMethod("GET");
+        connection.setRequestProperty("Authorization", "Bearer " + token); // creates authorized header
+        int statusCode = connection.getResponseCode();
+
+        InputStream responseStream = statusCode >= 200 && statusCode < 300 
+            ? connection.getInputStream() : connection.getErrorStream();
+
+        String responseText = readResponse(responseStream);
+        JSONObject responseJson = new JSONObject(responseText);
+
+        if (statusCode >= 200 && statusCode < 300) {
+            return new UserProfile(
+                responseJson.getLong("user_id"),
+                responseJson.getString("name"),
+                responseJson.getString("email"),
+                responseJson.getString("username")
+            );
+        }
+        String message = responseJson.optString("detail","Could not get user profile");
+        throw new ApiException(statusCode,message);
+    }
+
+    // Added a method for register and login from the backend
     public static void register(
         String name,
         String email,
@@ -113,6 +148,23 @@ public final class ApiClient {
         return response.toString();
     }
 
+    // Data that is returned after a successful backend login
+    public static class LoginResult {
+        public final String accessToken;
+        public final long userId;
+        public final String name;
+        public final String email;
+        public final String username;
+
+        public LoginResult(String accessToken,long userId, String name, String email, String username) {
+            this.accessToken = accessToken;
+            this.userId = userId;
+            this.name = name;
+            this.email = email;
+            this.username = username;
+        }
+    }
+
     public static class ApiException extends Exception {
         private final int statusCode;
 
@@ -123,6 +175,21 @@ public final class ApiClient {
 
         public int getStatusCode() {
             return statusCode;
+        }
+    }
+
+    // user information returned by the backend
+    public static class UserProfile {
+        public final long userId;
+        public final String name;
+        public final String email;
+        public final String username;
+
+        public UserProfile(long userId, String name, String email, String username){
+            this.userId=userId;
+            this.name=name;
+            this.email=email;
+            this.username=username;
         }
     }
 }

@@ -114,21 +114,43 @@ public class HomeActivity extends AppCompatActivity {
             User user = databaseManager.getUserById(userId);
             List<Account> accounts = user == null ? null : databaseManager.getAccountsForUser(userId);
 
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed()) return;
-                if (user == null) {
+            if (user == null) {
+                // Get the logged in user's profile from the backend
+                /*try {
+                    ApiClient.UserProfile profile = ApiClient.getCurrentUser(session.getToken());
                     runOnUiThread(() -> {
-                        textWelcome.setText("Welcome back.");
+                        if (isFinishing() || isDestroyed()) return;
+                        textWelcome.setText("Welcome back");
+                        String firstLetter = profile.name.substring(0,1).toUpperCase();
                         textAvatar.setText("U");
                         showAccounts(java.util.Collections.emptyList());
                     });
-                    return;
-                }
+                  } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        Toast.makeText(this,"Could not load your profile.",Toast.LENGTH_LONG).show();
+                        session.logout();
+                        goToLogin();
+                    });
+                } */
+               runOnUiThread(() -> {
+                    String displayName = session.getDisplayName();
+                    if (displayName == null || displayName.isEmpty()) {
+                        displayName = "there";
+                    }
+                    textWelcome.setText("Welcome back, "+displayName+"!");
+                    textAvatar.setText(displayName.substring(0,1).toUpperCase());
+
+               });
+                return;
+            }
+            /* 
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
                 currentUser = user;
                 textWelcome.setText("Welcome back, " + user.getFirstName() + ".");
                 textAvatar.setText(initials(user));
                 showAccounts(accounts);
-            });
+            });*/
         });
     }
 

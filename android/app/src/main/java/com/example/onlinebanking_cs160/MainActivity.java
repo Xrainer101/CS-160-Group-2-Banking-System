@@ -27,10 +27,11 @@ public class MainActivity extends AppCompatActivity {
         session = new SessionManager(this);
 
         // Already logged in from last time? Skip the login screen.
-        if (session.isLoggedIn()) {
+        // Can be implemented later with time sessions enabled
+        /*if (session.isLoggedIn()) {
             goToHome();
             return;
-        }
+        }*/
 
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
@@ -70,11 +71,11 @@ public class MainActivity extends AppCompatActivity {
         binding.buttonLogin.setEnabled(false);
         executorService.execute(() -> {
             try {
-                String token = ApiClient.login(username, password); // calls backend login method from Android
+                ApiClient.LoginResult result = ApiClient.login(username, password); // calls backend login method from Android
                 runOnUiThread(() -> {
                     binding.buttonLogin.setEnabled(true);
                     // saves the backend JWT token
-                    session.login(token);
+                    session.login(result.accessToken,result.name);
                     goToHome();
                 });
             } catch (ApiClient.ApiException e) {
