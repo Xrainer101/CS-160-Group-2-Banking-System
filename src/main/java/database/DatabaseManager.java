@@ -138,6 +138,25 @@ public class DatabaseManager {
     }
 
     /**
+     * Fetches a user's ID by their username to avoid hardcoding foreign keys.
+     */
+    public static int getUserIdByUsername(String username) {
+        String sql = "SELECT user_id FROM users WHERE username = ?";
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, username);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("user_id");
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println("Error fetching user ID: " + e.getMessage());
+        }
+        return -1; // User not found
+    }
+
+    /**
      * Deletes a user profile by username. 
      * Re-enables foreign key constraints so ON DELETE CASCADE automatically 
      * removes any bank accounts linked to this user.
@@ -252,6 +271,7 @@ public class DatabaseManager {
         return null;
     }
 
+    // Return someting useful
     /**
      * Searches for and displays all bank accounts belonging to a given username.
      */
@@ -510,6 +530,63 @@ public class DatabaseManager {
         return false;
     }
 
+    // Timed transfers
+
+    /**
+     * Queries the ledger and prints a chronological bank statement for a specific account.
+     */
+    public static void printBankStatement(String accountNumber) {
+        // ORDER BY timestamp ASC ensures chronological order (oldest to newest)
+        String sql = "SELECT timestamp, transaction_type, amount, related_account " +
+                     "FROM transactions WHERE account_number = ? ORDER BY timestamp ASC";
+
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, accountNumber);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                System.out.println("\n=== Bank Statement for Account #" + accountNumber + " ===");
+                System.out.printf("%-20s | %-14s | %-10s | %s%n", "Date", "Type", "Amount", "Details");
+                System.out.println("----------------------------------------------------------------------");
+
+                boolean hasTransactions = false;
+
+                while (rs.next()) {
+                    hasTransactions = true;
+                    String date = rs.getString("timestamp");
+                    String type = rs.getString("transaction_type").toUpperCase();
+                    double amount = rs.getDouble("amount");
+                    String relatedAccount = rs.getString("related_account");
+
+                    // Determine if money is coming in or going out for formatting
+                    String amountDisplay;
+                    if (type.equals("DEPOSIT") || type.equals("TRANSFER_IN")) {
+                        amountDisplay = String.format("+$%.2f", amount);
+                    } else {
+                        amountDisplay = String.format("-$%.2f", amount);
+                    }
+
+                    // Show the related account only if it was a transfer
+                    String details = (relatedAccount != null) ? "Account #" + relatedAccount : "-";
+
+                    System.out.printf("%-20s | %-14s | %-10s | %s%n", date, type, amountDisplay, details);
+                }
+
+                if (!hasTransactions) {
+                    System.out.println("No transactions found for this account.");
+                }
+                System.out.println("----------------------------------------------------------------------\n");
+            }
+        } catch (SQLException e) {
+            System.out.println("Error generating bank statement: " + e.getMessage());
+        }
+    }
+
+    // External accounts
+
+    // Manager management
+
     // Main method to test it out
     public static void main(String[] args) {
         initializeDatabase();
@@ -520,13 +597,19 @@ public class DatabaseManager {
         // Test querying the user back
         getUserByUsername("john_doe");
 
+        int userID = getUserIdByUsername("john_doe");
+
+        System.out.println();
+
         // Example: Create a Checking account with a $250.00 initial deposit for User ID 1
-        String testNum1 = createBankAccount(1, "checking", 250.00);
+        String testNum1 = createBankAccount(userID, "checking", 250.00);
 
         // Example: Create a Savings account for the same user (User ID 1)
-        String testNum2 = createBankAccount(1, "savings", 1000.00);
+        String testNum2 = createBankAccount(userID, "savings", 1000.00);
 
         getBankAccountsByUsername("john_doe");
+
+        System.out.println();
 
         // Test deposit
         deposit(testNum1, 50);
@@ -538,6 +621,10 @@ public class DatabaseManager {
         transfer(testNum1, testNum2, 100);
 
         getBankAccountsByUsername("john_doe");
+
+        printBankStatement(testNum1);
+
+        System.out.println();
 
         // Test close
         if (testNum1 != null) {
