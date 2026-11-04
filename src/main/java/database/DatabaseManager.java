@@ -8,6 +8,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.util.ArrayList;
+import java.util.List;
 
 public class DatabaseManager {
     // This will create a file named "bank.db" in your project root directory
@@ -102,7 +104,7 @@ public class DatabaseManager {
     }
 
     // 3. Example: Running a SELECT Query (Fetching User Details)
-    public static void getUserByUsername(String targetUsername) {
+    public static User getUserByUsername(String targetUsername) {
         String sql = "SELECT user_id, username, first_name, last_name, email, phone_number, role, failed_login_attempts FROM users WHERE username = ?";
 
         try (Connection conn = DriverManager.getConnection(DB_URL);
@@ -117,16 +119,20 @@ public class DatabaseManager {
                     String user = rs.getString("username");
                     String firstName = rs.getString("first_name");
                     String lastName = rs.getString("last_name");
-                    long phone = rs.getLong("phone_number");
+                    String email = rs.getString("email");
+                    String phone = rs.getString("phone_number");
                     String role = rs.getString("role");
                     int failedAttempts = rs.getInt("failed_login_attempts");
 
                     System.out.println("Found User -> ID: " + id
                         + ", Username: " + user
                         + ", Name: " + firstName + " " + lastName
+                        + ", Email: " + email
                         + ", Phone: " + phone
                         + ", Role: " + role
                         + ", Failed Logins: " + failedAttempts);
+
+                    return new User(id, user, firstName, lastName, email, phone, role, failedAttempts);
                 } else {
                     System.out.println("No user found with username: " + targetUsername);
                 }
@@ -135,6 +141,27 @@ public class DatabaseManager {
         } catch (SQLException e) {
             System.out.println("Query execution error: " + e.getMessage());
         }
+
+        return null;
+    }
+
+    /**
+     * Fetches a user's ID by their username to avoid hardcoding foreign keys.
+     */
+    public static int getUserIdByUsername(String username) {
+        String sql = "SELECT user_id FROM users WHERE username = ?";
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, username);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("user_id");
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println("Error fetching user ID: " + e.getMessage());
+        }
+        return -1; // User not found
     }
 
     /**
@@ -252,10 +279,13 @@ public class DatabaseManager {
         return null;
     }
 
+    // Return someting useful
     /**
      * Searches for and displays all bank accounts belonging to a given username.
      */
-    public static void getBankAccountsByUsername(String targetUsername) {
+    public static List<BankAccount> getBankAccountsByUsername(String targetUsername) {
+        List<BankAccount> accounts = new ArrayList<>();
+        
         // SQL JOIN ties bank_accounts to users using user_id
         String sql = "SELECT u.username, u.first_name, u.last_name, " +
                      "ba.account_id, ba.account_number, ba.routing_number, ba.account_type, ba.balance, ba.status " +
@@ -286,6 +316,9 @@ public class DatabaseManager {
                     double balance = rs.getDouble("balance");
                     String status = rs.getString("status");
 
+                    BankAccount account = new BankAccount(accountId, accountNumber, routingNumber, type, balance, status);
+                    accounts.add(account);
+
                     System.out.printf("Account ID: %d | Acc #: %s | Routing #: %s | Type: %-8s | Balance: $%.2f | Status: %s%n",
                             accountId, accountNumber, routingNumber, type, balance, status);
                 }
@@ -294,10 +327,11 @@ public class DatabaseManager {
                     System.out.println("No bank accounts found for username: " + targetUsername);
                 }
             }
-
         } catch (SQLException e) {
             System.out.println("Error searching bank accounts: " + e.getMessage());
         }
+
+        return accounts;
     }
 
     public static boolean closeBankAccount(String accountNumber) {
@@ -510,6 +544,73 @@ public class DatabaseManager {
         return false;
     }
 
+    // Timed transfers
+
+    /**
+     * Queries the ledger and prints a chronological bank statement for a specific account.
+     */
+    public static List<Transaction> getTransactionsByAccountNumber(String accountNumber) {
+        List<Transaction> transactions = new ArrayList<>();
+
+        // ORDER BY timestamp ASC ensures chronological order (oldest to newest)
+        String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, timestamp " +
+                     "FROM transactions WHERE account_number = ? ORDER BY timestamp ASC";
+
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, accountNumber);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                System.out.println("\n=== Bank Statement for Account #" + accountNumber + " ===");
+                System.out.printf("%-20s | %-14s | %-10s | %s%n", "Date", "Type", "Amount", "Details");
+                System.out.println("----------------------------------------------------------------------");
+
+                boolean hasTransactions = false;
+
+                while (rs.next()) {
+                    hasTransactions = true;
+                    int id = rs.getInt("transaction_id");
+                    String accNum = rs.getString("account_number");
+                    String type = rs.getString("transaction_type");
+                    double amount = rs.getDouble("amount");
+                    String relatedAcc = rs.getString("related_account");
+                    String timestamp = rs.getString("timestamp");
+
+                    // Create the model and add it to the list
+                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, timestamp);
+                    transactions.add(transaction);
+
+                    // Determine if money is coming in or going out for formatting
+                    String amountDisplay;
+                    if (type.equals("DEPOSIT") || type.equals("TRANSFER_IN")) {
+                        amountDisplay = String.format("+$%.2f", amount);
+                    } else {
+                        amountDisplay = String.format("-$%.2f", amount);
+                    }
+
+                    // Show the related account only if it was a transfer
+                    String details = (relatedAcc != null) ? "Account #" + relatedAcc : "-";
+
+                    System.out.printf("%-20s | %-14s | %-10s | %s%n", timestamp, type, amountDisplay, details);
+                }
+
+                if (!hasTransactions) {
+                    System.out.println("No transactions found for this account.");
+                }
+                System.out.println("----------------------------------------------------------------------\n");
+            }
+        } catch (SQLException e) {
+            System.out.println("Error generating bank statement: " + e.getMessage());
+        }
+
+        return transactions;
+    }
+
+    // External accounts
+
+    // Manager management
+
     // Main method to test it out
     public static void main(String[] args) {
         initializeDatabase();
@@ -520,13 +621,19 @@ public class DatabaseManager {
         // Test querying the user back
         getUserByUsername("john_doe");
 
+        int userID = getUserIdByUsername("john_doe");
+
+        System.out.println();
+
         // Example: Create a Checking account with a $250.00 initial deposit for User ID 1
-        String testNum1 = createBankAccount(1, "checking", 250.00);
+        String testNum1 = createBankAccount(userID, "checking", 250.00);
 
         // Example: Create a Savings account for the same user (User ID 1)
-        String testNum2 = createBankAccount(1, "savings", 1000.00);
+        String testNum2 = createBankAccount(userID, "savings", 1000.00);
 
         getBankAccountsByUsername("john_doe");
+
+        System.out.println();
 
         // Test deposit
         deposit(testNum1, 50);
@@ -538,6 +645,10 @@ public class DatabaseManager {
         transfer(testNum1, testNum2, 100);
 
         getBankAccountsByUsername("john_doe");
+
+        getTransactionsByAccountNumber(testNum1);
+
+        System.out.println();
 
         // Test close
         if (testNum1 != null) {
