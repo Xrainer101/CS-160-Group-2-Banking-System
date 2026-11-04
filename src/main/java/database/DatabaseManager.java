@@ -8,6 +8,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.util.ArrayList;
+import java.util.List;
 
 public class DatabaseManager {
     // This will create a file named "bank.db" in your project root directory
@@ -102,7 +104,7 @@ public class DatabaseManager {
     }
 
     // 3. Example: Running a SELECT Query (Fetching User Details)
-    public static void getUserByUsername(String targetUsername) {
+    public static User getUserByUsername(String targetUsername) {
         String sql = "SELECT user_id, username, first_name, last_name, email, phone_number, role, failed_login_attempts FROM users WHERE username = ?";
 
         try (Connection conn = DriverManager.getConnection(DB_URL);
@@ -117,16 +119,20 @@ public class DatabaseManager {
                     String user = rs.getString("username");
                     String firstName = rs.getString("first_name");
                     String lastName = rs.getString("last_name");
-                    long phone = rs.getLong("phone_number");
+                    String email = rs.getString("email");
+                    String phone = rs.getString("phone_number");
                     String role = rs.getString("role");
                     int failedAttempts = rs.getInt("failed_login_attempts");
 
                     System.out.println("Found User -> ID: " + id
                         + ", Username: " + user
                         + ", Name: " + firstName + " " + lastName
+                        + ", Email: " + email
                         + ", Phone: " + phone
                         + ", Role: " + role
                         + ", Failed Logins: " + failedAttempts);
+
+                    return new User(id, user, firstName, lastName, email, phone, role, failedAttempts);
                 } else {
                     System.out.println("No user found with username: " + targetUsername);
                 }
@@ -135,6 +141,8 @@ public class DatabaseManager {
         } catch (SQLException e) {
             System.out.println("Query execution error: " + e.getMessage());
         }
+
+        return null;
     }
 
     /**
@@ -275,7 +283,9 @@ public class DatabaseManager {
     /**
      * Searches for and displays all bank accounts belonging to a given username.
      */
-    public static void getBankAccountsByUsername(String targetUsername) {
+    public static List<BankAccount> getBankAccountsByUsername(String targetUsername) {
+        List<BankAccount> accounts = new ArrayList<>();
+        
         // SQL JOIN ties bank_accounts to users using user_id
         String sql = "SELECT u.username, u.first_name, u.last_name, " +
                      "ba.account_id, ba.account_number, ba.routing_number, ba.account_type, ba.balance, ba.status " +
@@ -306,6 +316,9 @@ public class DatabaseManager {
                     double balance = rs.getDouble("balance");
                     String status = rs.getString("status");
 
+                    BankAccount account = new BankAccount(accountId, accountNumber, routingNumber, type, balance, status);
+                    accounts.add(account);
+
                     System.out.printf("Account ID: %d | Acc #: %s | Routing #: %s | Type: %-8s | Balance: $%.2f | Status: %s%n",
                             accountId, accountNumber, routingNumber, type, balance, status);
                 }
@@ -314,10 +327,11 @@ public class DatabaseManager {
                     System.out.println("No bank accounts found for username: " + targetUsername);
                 }
             }
-
         } catch (SQLException e) {
             System.out.println("Error searching bank accounts: " + e.getMessage());
         }
+
+        return accounts;
     }
 
     public static boolean closeBankAccount(String accountNumber) {
@@ -535,9 +549,11 @@ public class DatabaseManager {
     /**
      * Queries the ledger and prints a chronological bank statement for a specific account.
      */
-    public static void printBankStatement(String accountNumber) {
+    public static List<Transaction> getTransactionsByAccountNumber(String accountNumber) {
+        List<Transaction> transactions = new ArrayList<>();
+
         // ORDER BY timestamp ASC ensures chronological order (oldest to newest)
-        String sql = "SELECT timestamp, transaction_type, amount, related_account " +
+        String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, timestamp " +
                      "FROM transactions WHERE account_number = ? ORDER BY timestamp ASC";
 
         try (Connection conn = DriverManager.getConnection(DB_URL);
@@ -554,10 +570,16 @@ public class DatabaseManager {
 
                 while (rs.next()) {
                     hasTransactions = true;
-                    String date = rs.getString("timestamp");
-                    String type = rs.getString("transaction_type").toUpperCase();
+                    int id = rs.getInt("transaction_id");
+                    String accNum = rs.getString("account_number");
+                    String type = rs.getString("transaction_type");
                     double amount = rs.getDouble("amount");
-                    String relatedAccount = rs.getString("related_account");
+                    String relatedAcc = rs.getString("related_account");
+                    String timestamp = rs.getString("timestamp");
+
+                    // Create the model and add it to the list
+                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, timestamp);
+                    transactions.add(transaction);
 
                     // Determine if money is coming in or going out for formatting
                     String amountDisplay;
@@ -568,9 +590,9 @@ public class DatabaseManager {
                     }
 
                     // Show the related account only if it was a transfer
-                    String details = (relatedAccount != null) ? "Account #" + relatedAccount : "-";
+                    String details = (relatedAcc != null) ? "Account #" + relatedAcc : "-";
 
-                    System.out.printf("%-20s | %-14s | %-10s | %s%n", date, type, amountDisplay, details);
+                    System.out.printf("%-20s | %-14s | %-10s | %s%n", timestamp, type, amountDisplay, details);
                 }
 
                 if (!hasTransactions) {
@@ -581,6 +603,8 @@ public class DatabaseManager {
         } catch (SQLException e) {
             System.out.println("Error generating bank statement: " + e.getMessage());
         }
+
+        return transactions;
     }
 
     // External accounts
@@ -622,7 +646,7 @@ public class DatabaseManager {
 
         getBankAccountsByUsername("john_doe");
 
-        printBankStatement(testNum1);
+        getTransactionsByAccountNumber(testNum1);
 
         System.out.println();
 
