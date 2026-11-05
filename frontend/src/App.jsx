@@ -202,7 +202,7 @@ function AppContent() {
                       />
                       <Route
                         path="/accounts"
-                        element={<Accounts {...shared} />}
+                        element={<Accounts />}
                       />
                       <Route
                         path="/transactions"
