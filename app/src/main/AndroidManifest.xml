@@ -23,6 +23,30 @@
             android:name=".HomeActivity"
             android:exported="false" />
 
+        <!-- Screens opened from the home screen -->
+        <activity
+            android:name=".AccountDetailActivity"
+            android:exported="false" />
+        <activity
+            android:name=".MoveMoneyActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".TransactionsActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".PayBillsActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".CardsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Login screen: the first screen when the app opens -->
         <activity
             android:name=".MainActivity"

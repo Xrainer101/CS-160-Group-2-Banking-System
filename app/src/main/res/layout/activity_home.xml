@@ -161,6 +161,12 @@
                     style="@style/SectionTitle"
                     android:text="Accounts" />
 
+                <TextView
+                    android:id="@+id/textTotalBalance"
+                    style="@style/HintText"
+                    android:layout_marginTop="4dp"
+                    android:textSize="13sp" />
+
                 <Button
                     android:id="@+id/buttonOpenAccount"
                     style="@style/Widget.Material3.Button.OutlinedButton"
@@ -203,7 +209,7 @@
                     style="@style/SectionTitle"
                     android:text="What would you like to do?" />
 
-                <!-- Filled in by HomeActivity (one item_quick_action per action) -->
+                <!-- Filled in by HomeActivity: rows of two item_quick_action tiles -->
                 <LinearLayout
                     android:id="@+id/quickActionsContainer"
                     android:layout_width="match_parent"
@@ -246,17 +252,18 @@
                             android:text="View all" />
                     </LinearLayout>
 
-                    <!-- Transaction rows will go here once there is a transactions table -->
+                    <!-- Latest 5 transactions, added by HomeActivity (one item_transaction each) -->
                     <LinearLayout
                         android:id="@+id/transactionsContainer"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
                         android:orientation="vertical" />
 
                     <TextView
                         android:id="@+id/textNoTransactions"
                         style="@style/EmptyStateText"
-                        android:text="No transactions yet.\nDeposits, payments and transfers will show up here." />
+                        android:text="No transactions yet.\nTap Deposit above to add money to an account." />
                 </LinearLayout>
 
                 <!-- ========== UPCOMING PAYMENTS ========== -->
@@ -295,11 +302,13 @@
                             android:text="Manage" />
                     </LinearLayout>
 
-                    <!-- Payment rows will go here once there is a bill-pay table -->
+                    <!-- Next 3 scheduled bills, added by HomeActivity (one item_payment each) -->
                     <LinearLayout
                         android:id="@+id/paymentsContainer"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:layout_marginBottom="8dp"
                         android:orientation="vertical" />
 
                     <TextView

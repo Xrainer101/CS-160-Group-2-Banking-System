@@ -15,20 +15,27 @@ public class SessionManager {
         prefs = context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 
+    /**
+     * @param previousLogin when this user last logged in before now (millis since 1970),
+     *                      or 0 if this is their first login. Shown as "Last login" on the home screen.
+     */
     public void login(long userId, long previousLogin) {
-        prefs.edit().putLong(KEY_USER_ID, userId).putLong(KEY_PREVIOUS_LOGIN, previousLogin).apply();
+        prefs.edit()
+                .putLong(KEY_USER_ID, userId)
+                .putLong(KEY_PREVIOUS_LOGIN, previousLogin)
+                .apply();
     }
 
     public boolean isLoggedIn() {
         return getUserId() != -1;
     }
 
-    // logged in user's id, or -1 if nobody is logged in
+    /** The logged-in user's id, or -1 if nobody is logged in. */
     public long getUserId() {
         return prefs.getLong(KEY_USER_ID, -1);
     }
 
-    // login before the current one, or 0 if this is the first one
+    /** The login before the current one (millis since 1970), or 0 if this is the first. */
     public long getPreviousLogin() {
         return prefs.getLong(KEY_PREVIOUS_LOGIN, 0);
     }

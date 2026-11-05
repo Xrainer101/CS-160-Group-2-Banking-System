@@ -6,12 +6,10 @@ import android.text.format.DateFormat;
 import android.text.format.DateUtils;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AlertDialog;
@@ -20,7 +18,6 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
-import java.text.NumberFormat;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
@@ -31,14 +28,20 @@ import java.util.concurrent.Executors;
 
 import database.Account;
 import database.DatabaseManager;
+import database.ScheduledPayment;
+import database.Transaction;
 import database.User;
 
 // Home screen shown after a successful login (based on the team's homepage design)
 public class HomeActivity extends AppCompatActivity {
-    private static final int MENU_LOG_OUT = 1;
+    private static final int MENU_CARDS = 1;
+    private static final int MENU_SETTINGS = 2;
+    private static final int MENU_LOG_OUT = 3;
+
+    private static final int RECENT_TRANSACTIONS = 5;
+    private static final int UPCOMING_PAYMENTS = 3;
 
     private final ExecutorService executorService = Executors.newSingleThreadExecutor();
-    private final NumberFormat currency = NumberFormat.getCurrencyInstance(Locale.US);
 
     private SessionManager session;
     private DatabaseManager databaseManager;
@@ -47,8 +50,18 @@ public class HomeActivity extends AppCompatActivity {
     private TextView textAvatar;
     private TextView textWelcome;
     private TextView textLastLogin;
+    private TextView textTotalBalance;
     private LinearLayout accountsContainer;
     private TextView textNoAccounts;
+
+    /** Holds everything the home screen shows, loaded together on a background thread. */
+    private static class HomeData {
+        User user;
+        List<Account> accounts;
+        List<Transaction> transactions;
+        List<ScheduledPayment> payments;
+        DatabaseManager.PaymentRunResult billRun;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -58,7 +71,7 @@ public class HomeActivity extends AppCompatActivity {
 
         session = new SessionManager(this);
         if (!session.isLoggedIn()) {
-            goToLogin();
+            Ui.goToLogin(this);
             return;
         }
         databaseManager = DatabaseManager.getInstance(this);
@@ -77,6 +90,7 @@ public class HomeActivity extends AppCompatActivity {
         textAvatar = findViewById(R.id.textAvatar);
         textWelcome = findViewById(R.id.textWelcome);
         textLastLogin = findViewById(R.id.textLastLogin);
+        textTotalBalance = findViewById(R.id.textTotalBalance);
         accountsContainer = findViewById(R.id.accountsContainer);
         textNoAccounts = findViewById(R.id.textNoAccounts);
 
@@ -84,48 +98,58 @@ public class HomeActivity extends AppCompatActivity {
 
         textAvatar.setOnClickListener(this::showAccountMenu);
         findViewById(R.id.buttonNotifications).setOnClickListener(v ->
-                toast("You have no new notifications"));
-
-        Button buttonOpenAccount = findViewById(R.id.buttonOpenAccount);
-        buttonOpenAccount.setOnClickListener(v -> showOpenAccountDialog());
+                Ui.toast(this, "You have no new notifications"));
+        findViewById(R.id.buttonOpenAccount).setOnClickListener(v -> showOpenAccountDialog());
 
         setUpQuickActions();
 
-        // Not built yet: these need transactions / bill-pay tables in the database
-        findViewById(R.id.buttonViewAllTransactions).setOnClickListener(v -> toast("Transaction history is coming soon"));
-        findViewById(R.id.buttonManagePayments).setOnClickListener(v -> toast("Bill Pay is coming soon"));
-        findViewById(R.id.buttonSchedulePayment).setOnClickListener(v -> toast("Bill Pay is coming soon"));
+        findViewById(R.id.buttonViewAllTransactions).setOnClickListener(v ->
+                startActivity(new Intent(this, TransactionsActivity.class)));
+        findViewById(R.id.buttonManagePayments).setOnClickListener(v ->
+                startActivity(new Intent(this, PayBillsActivity.class)));
+        findViewById(R.id.buttonSchedulePayment).setOnClickListener(v ->
+                startActivity(new Intent(this, PayBillsActivity.class)));
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        // Reload every time the screen comes back, so balances stay up to date
-        if (session.isLoggedIn()) loadUserAndAccounts();
+        // Reload every time the screen comes back, so balances and activity stay up to date
+        if (session.isLoggedIn() && databaseManager != null) loadHome();
     }
 
     // ------------------------------------------------------------------
     // Loading data
     // ------------------------------------------------------------------
 
-    private void loadUserAndAccounts() {
+    private void loadHome() {
         long userId = session.getUserId();
         executorService.execute(() -> {
-            User user = databaseManager.getUserById(userId);
-            List<Account> accounts = user == null ? null : databaseManager.getAccountsForUser(userId);
+            HomeData data = new HomeData();
+            data.user = databaseManager.getUserById(userId);
+            if (data.user != null) {
+                // Pay any scheduled bills whose date has arrived, before showing balances
+                data.billRun = databaseManager.processDuePayments(userId);
+                data.accounts = databaseManager.getAccountsForUser(userId);
+                data.transactions = databaseManager.getTransactionsForUser(userId, RECENT_TRANSACTIONS);
+                data.payments = databaseManager.getUpcomingPayments(userId);
+            }
 
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
-                if (user == null) {
+                if (data.user == null) {
                     // The saved session points to a user that no longer exists (e.g. the database was reset)
                     session.logout();
-                    goToLogin();
+                    Ui.goToLogin(this);
                     return;
                 }
-                currentUser = user;
-                textWelcome.setText("Welcome back, " + user.getFirstName() + ".");
-                textAvatar.setText(initials(user));
-                showAccounts(accounts);
+                currentUser = data.user;
+                textWelcome.setText("Welcome back, " + data.user.getFirstName() + ".");
+                textAvatar.setText(initials(data.user));
+                showAccounts(data.accounts);
+                showTransactions(data.transactions);
+                showPayments(data.payments);
+                announceBillRun(data.billRun);
             });
         });
     }
@@ -134,30 +158,95 @@ public class HomeActivity extends AppCompatActivity {
         accountsContainer.removeAllViews();
         textNoAccounts.setVisibility(accounts.isEmpty() ? View.VISIBLE : View.GONE);
 
+        double total = 0;
         LayoutInflater inflater = LayoutInflater.from(this);
         for (Account account : accounts) {
+            total += account.getBalance();
             View card = inflater.inflate(R.layout.item_account, accountsContainer, false);
 
-            ((TextView) card.findViewById(R.id.textAccountType)).setText(account.getDisplayType());
+            String type = account.getDisplayType() + (account.isFrozen() ? "  ·  Frozen" : "");
+            ((TextView) card.findViewById(R.id.textAccountType)).setText(type);
             ((TextView) card.findViewById(R.id.textAccountNumber)).setText(account.getMaskedNumber());
 
-            String balance = currency.format(account.getBalance());
+            String balance = Ui.money(account.getBalance());
             ((TextView) card.findViewById(R.id.textBalance)).setText(balance);
-            // No pending holds yet, so the available balance equals the current balance
+            // No pending holds, so the available balance equals the current balance
             ((TextView) card.findViewById(R.id.textAvailable)).setText(balance);
 
-            card.findViewById(R.id.buttonViewAccount).setOnClickListener(v ->
-                    toast("Account details are coming soon"));
-            card.findViewById(R.id.buttonAccountMenu).setOnClickListener(v ->
-                    toast(account.getDisplayType() + " account " + account.getMaskedNumber()));
+            String number = account.getAccountNumber();
+            card.findViewById(R.id.buttonViewAccount).setOnClickListener(v -> AccountDetailActivity.open(this, number));
+            card.findViewById(R.id.buttonAccountMenu).setOnClickListener(v -> showAccountCardMenu(v, number));
+            card.setOnClickListener(v -> AccountDetailActivity.open(this, number));
 
             accountsContainer.addView(card);
+        }
+
+        textTotalBalance.setText(accounts.isEmpty() ? ""
+                : "Total balance: " + Ui.money(total) + " across " + accounts.size()
+                + (accounts.size() == 1 ? " account" : " accounts"));
+        textTotalBalance.setVisibility(accounts.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    private void showTransactions(List<Transaction> transactions) {
+        LinearLayout container = findViewById(R.id.transactionsContainer);
+        container.removeAllViews();
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (int i = 0; i < transactions.size(); i++) {
+            container.addView(Ui.transactionRow(inflater, container, transactions.get(i), i > 0, true));
+        }
+        findViewById(R.id.textNoTransactions).setVisibility(transactions.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
+    private void showPayments(List<ScheduledPayment> payments) {
+        LinearLayout container = findViewById(R.id.paymentsContainer);
+        container.removeAllViews();
+        LayoutInflater inflater = LayoutInflater.from(this);
+        int count = Math.min(payments.size(), UPCOMING_PAYMENTS);
+        for (int i = 0; i < count; i++) {
+            View row = Ui.paymentRow(inflater, container, payments.get(i), i > 0);
+            row.setOnClickListener(v -> startActivity(new Intent(this, PayBillsActivity.class)));
+            container.addView(row);
+        }
+        findViewById(R.id.textNoPayments).setVisibility(payments.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
+    /** If any bills were paid (or failed) just now, say so, if the user wants transaction alerts. */
+    private void announceBillRun(DatabaseManager.PaymentRunResult run) {
+        if (run == null || !Ui.transactionAlertsOn(this)) return;
+        if (run.failed > 0) {
+            new AlertDialog.Builder(this)
+                    .setTitle("A bill payment failed")
+                    .setMessage(run.failed + (run.failed == 1 ? " scheduled payment" : " scheduled payments")
+                            + " couldn't be made. Open Pay Bills to see why and try again.")
+                    .setPositiveButton("Pay Bills", (d, w) -> startActivity(new Intent(this, PayBillsActivity.class)))
+                    .setNegativeButton("Later", null)
+                    .show();
+        } else if (run.paid > 0) {
+            Ui.toast(this, run.paid + (run.paid == 1 ? " scheduled bill was paid." : " scheduled bills were paid."));
         }
     }
 
     // ------------------------------------------------------------------
-    // Open New Account
+    // Account cards
     // ------------------------------------------------------------------
+
+    private void showAccountCardMenu(View anchor, String accountNumber) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add(0, 1, 0, "Deposit");
+        menu.getMenu().add(0, 2, 1, "Withdraw");
+        menu.getMenu().add(0, 3, 2, "Transfer");
+        menu.getMenu().add(0, 4, 3, "Account details");
+        menu.setOnMenuItemClickListener(item -> {
+            switch (item.getItemId()) {
+                case 1: MoveMoneyActivity.open(this, MoveMoneyActivity.MODE_DEPOSIT, accountNumber); return true;
+                case 2: MoveMoneyActivity.open(this, MoveMoneyActivity.MODE_WITHDRAW, accountNumber); return true;
+                case 3: MoveMoneyActivity.open(this, MoveMoneyActivity.MODE_TRANSFER, accountNumber); return true;
+                case 4: AccountDetailActivity.open(this, accountNumber); return true;
+                default: return false;
+            }
+        });
+        menu.show();
+    }
 
     private void showOpenAccountDialog() {
         String[] labels = {"Checking", "Savings"};
@@ -176,46 +265,70 @@ public class HomeActivity extends AppCompatActivity {
             Account account = databaseManager.openAccount(userId, type);
             runOnUiThread(() -> {
                 if (account == null) {
-                    toast("Couldn't open the account. Please try again.");
+                    Ui.toast(this, "Couldn't open the account. Please try again.");
                     return;
                 }
-                toast(label + " account " + account.getMaskedNumber() + " opened");
-                loadUserAndAccounts();
+                Ui.toast(this, label + " account " + account.getMaskedNumber() + " opened");
+                loadHome();
             });
         });
     }
 
     // ------------------------------------------------------------------
-    // Quick actions
+    // Quick actions (two per row)
     // ------------------------------------------------------------------
 
     private void setUpQuickActions() {
-        // icon, title, description: same four actions as the homepage design
+        // icon, title, description, what happens on tap
         Object[][] actions = {
-                {R.drawable.ic_transfer, "Transfer Money", "Move money between accounts"},
-                {R.drawable.ic_pay_bills, "Pay Bills", "Manage automatic payments"},
-                {R.drawable.ic_deposit_check, "Deposit Check", "Submit a mobile check deposit"},
-                {R.drawable.ic_find_atm, "Find ATM", "Locate nearby ATMs"},
+                {R.drawable.ic_arrow_down, "Deposit", "Add money to an account",
+                        (Runnable) () -> MoveMoneyActivity.open(this, MoveMoneyActivity.MODE_DEPOSIT, null)},
+                {R.drawable.ic_arrow_up, "Withdraw", "Take money out",
+                        (Runnable) () -> MoveMoneyActivity.open(this, MoveMoneyActivity.MODE_WITHDRAW, null)},
+                {R.drawable.ic_transfer, "Transfer", "Between accounts or people",
+                        (Runnable) () -> MoveMoneyActivity.open(this, MoveMoneyActivity.MODE_TRANSFER, null)},
+                {R.drawable.ic_pay_bills, "Pay Bills", "Schedule a payment",
+                        (Runnable) () -> startActivity(new Intent(this, PayBillsActivity.class))},
+                {R.drawable.ic_card, "My Cards", "Freeze or replace",
+                        (Runnable) () -> startActivity(new Intent(this, CardsActivity.class))},
+                {R.drawable.ic_list, "Activity", "Search your history",
+                        (Runnable) () -> startActivity(new Intent(this, TransactionsActivity.class))},
         };
 
         LinearLayout container = findViewById(R.id.quickActionsContainer);
         LayoutInflater inflater = LayoutInflater.from(this);
-        for (Object[] action : actions) {
-            View card = inflater.inflate(R.layout.item_quick_action, container, false);
-            String title = (String) action[1];
+        int gap = Math.round(12 * getResources().getDisplayMetrics().density);
 
-            ((ImageView) card.findViewById(R.id.imageActionIcon)).setImageResource((Integer) action[0]);
-            ((TextView) card.findViewById(R.id.textActionTitle)).setText(title);
-            ((TextView) card.findViewById(R.id.textActionDescription)).setText((String) action[2]);
+        LinearLayout row = null;
+        for (int i = 0; i < actions.length; i++) {
+            if (i % 2 == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                rowParams.bottomMargin = gap;
+                container.addView(row, rowParams);
+            }
+            Object[] action = actions[i];
+            View tile = inflater.inflate(R.layout.item_quick_action, row, false);
+            ((ImageView) tile.findViewById(R.id.imageActionIcon)).setImageResource((Integer) action[0]);
+            ((TextView) tile.findViewById(R.id.textActionTitle)).setText((String) action[1]);
+            ((TextView) tile.findViewById(R.id.textActionDescription)).setText((String) action[2]);
+            Runnable onTap = (Runnable) action[3];
+            tile.setOnClickListener(v -> onTap.run());
 
-            // Replace these toasts with startActivity(...) as each feature screen is built
-            card.setOnClickListener(v -> toast(title + " is coming soon"));
-            container.addView(card);
+            if (i % 2 == 0) {
+                // left tile: space between it and the right tile
+                LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) tile.getLayoutParams();
+                params.setMarginEnd(gap);
+                tile.setLayoutParams(params);
+            }
+            row.addView(tile);
         }
     }
 
     // ------------------------------------------------------------------
-    // Avatar menu / log out
+    // Avatar menu
     // ------------------------------------------------------------------
 
     private void showAccountMenu(View anchor) {
@@ -223,25 +336,28 @@ public class HomeActivity extends AppCompatActivity {
         if (currentUser != null) {
             String role = currentUser.getRole() == null ? "" : currentUser.getRole();
             if (!role.isEmpty()) role = Character.toUpperCase(role.charAt(0)) + role.substring(1);
-            menu.getMenu().add(currentUser.getFullName() + " · " + role).setEnabled(false);
+            menu.getMenu().add(0, 0, 0, currentUser.getFullName() + " · " + role).setEnabled(false);
         }
-        menu.getMenu().add(0, MENU_LOG_OUT, 1, "Log out");
+        menu.getMenu().add(0, MENU_CARDS, 1, "My Cards");
+        menu.getMenu().add(0, MENU_SETTINGS, 2, "Settings");
+        menu.getMenu().add(0, MENU_LOG_OUT, 3, "Log out");
         menu.setOnMenuItemClickListener(item -> {
-            if (item.getItemId() == MENU_LOG_OUT) {
-                session.logout();
-                goToLogin();
-                return true;
+            switch (item.getItemId()) {
+                case MENU_CARDS:
+                    startActivity(new Intent(this, CardsActivity.class));
+                    return true;
+                case MENU_SETTINGS:
+                    startActivity(new Intent(this, SettingsActivity.class));
+                    return true;
+                case MENU_LOG_OUT:
+                    session.logout();
+                    Ui.goToLogin(this);
+                    return true;
+                default:
+                    return false;
             }
-            return false;
         });
         menu.show();
-    }
-
-    private void goToLogin() {
-        Intent intent = new Intent(this, MainActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        startActivity(intent);
-        finish();
     }
 
     // ------------------------------------------------------------------
@@ -271,10 +387,6 @@ public class HomeActivity extends AppCompatActivity {
         boolean sameYear = then.get(Calendar.YEAR) == Calendar.getInstance().get(Calendar.YEAR);
         String day = new SimpleDateFormat(sameYear ? "MMM d" : "MMM d, yyyy", Locale.US).format(date);
         return day + ", " + time;
-    }
-
-    private void toast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
     @Override

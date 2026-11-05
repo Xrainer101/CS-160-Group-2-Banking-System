@@ -1,4 +1,4 @@
-package com.example.onlinebanking_cs160;
+package database;
 
 import android.util.Base64;
 

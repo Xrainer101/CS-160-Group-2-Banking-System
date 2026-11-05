@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Schedule a bill + list of upcoming bills (like "Schedule a bill" on the website's Transfers page) -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/white"
+    android:orientation="vertical">
+
+    <include layout="@layout/view_screen_header" />
+
+    <ScrollView
+        android:id="@+id/scrollContent"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/page_bg"
+        android:clipToPadding="false"
+        android:fillViewport="true"
+        android:paddingBottom="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                style="@style/SectionLabel"
+                android:layout_marginTop="8dp"
+                android:text="BILL PAY" />
+
+            <TextView
+                style="@style/SectionTitle"
+                android:text="Pay a bill"
+                android:textSize="24sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Pick a date and the money is paid from your account on that day."
+                android:textColor="@color/text_gray"
+                android:textSize="14sp" />
+
+            <!-- Form card -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="22dp">
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:labelFor="@id/editPayee"
+                    android:text="Pay to" />
+
+                <EditText
+                    android:id="@+id/editPayee"
+                    style="@style/FieldInput"
+                    android:hint="e.g. Internet provider"
+                    android:importantForAutofill="no"
+                    android:inputType="textCapWords"
+                    android:maxLength="40" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:labelFor="@id/editAmount"
+                    android:text="Amount" />
+
+                <EditText
+                    android:id="@+id/editAmount"
+                    style="@style/FieldInput"
+                    android:hint="$0.00"
+                    android:importantForAutofill="no"
+                    android:inputType="numberDecimal" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:text="Pay from" />
+
+                <FrameLayout
+                    style="@style/SpinnerBox"
+                    android:layout_marginBottom="16dp">
+
+                    <Spinner
+                        android:id="@+id/spinnerFrom"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp" />
+                </FrameLayout>
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:labelFor="@id/textDate"
+                    android:text="Pay on" />
+
+                <!-- Tapping this opens a date picker -->
+                <TextView
+                    android:id="@+id/textDate"
+                    style="@style/FieldInput"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:text="Repeat" />
+
+                <FrameLayout style="@style/SpinnerBox">
+
+                    <Spinner
+                        android:id="@+id/spinnerRepeat"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:contentDescription="How often to pay" />
+                </FrameLayout>
+
+                <!-- Shown when "Custom..." is chosen: Every [N] [days / weeks / months / years] -->
+                <LinearLayout
+                    android:id="@+id/groupCustomRepeat"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/labelRepeatEvery"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="10dp"
+                        android:labelFor="@id/editRepeatEvery"
+                        android:text="Every"
+                        android:textColor="@color/text_dark"
+                        android:textSize="15sp" />
+
+                    <EditText
+                        android:id="@+id/editRepeatEvery"
+                        style="@style/FieldInput"
+                        android:layout_width="72dp"
+                        android:layout_marginEnd="10dp"
+                        android:layout_marginBottom="0dp"
+                        android:gravity="center"
+                        android:hint="#"
+                        android:importantForAutofill="no"
+                        android:inputType="number"
+                        android:maxLength="3"
+                        android:text="2" />
+
+                    <FrameLayout
+                        style="@style/SpinnerBox"
+                        android:layout_width="0dp"
+                        android:layout_weight="1">
+
+                        <Spinner
+                            android:id="@+id/spinnerRepeatUnit"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:contentDescription="Days, weeks, months or years" />
+                    </FrameLayout>
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/textRepeatHint"
+                    style="@style/HintText"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:id="@+id/textError"
+                    style="@style/ErrorText" />
+
+                <Button
+                    android:id="@+id/buttonSchedule"
+                    style="@style/PrimaryButton"
+                    android:text="Schedule payment" />
+            </LinearLayout>
+
+            <!-- Upcoming bills -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    style="@style/SectionLabel"
+                    android:text="COMING UP" />
+
+                <TextView
+                    style="@style/SectionTitle"
+                    android:text="Upcoming payments" />
+
+                <TextView
+                    style="@style/HintText"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="8dp"
+                    android:text="Tap a payment to cancel it, or to stop a repeating one. Tap a failed payment to try it again." />
+
+                <LinearLayout
+                    android:id="@+id/paymentsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <TextView
+                    android:id="@+id/textNoPayments"
+                    style="@style/EmptyStateText"
+                    android:text="No scheduled payments."
+                    android:visibility="gone" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>
