@@ -1,9 +1,11 @@
 package com.example.onlinebanking_cs160;
 
 import android.os.Bundle;
+import android.text.TextWatcher;
 import android.util.Patterns;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
@@ -33,6 +35,7 @@ public class RegisterActivity extends AppCompatActivity {
     private EditText editUsername;
     private EditText editPassword;
     private EditText editConfirmPassword;
+    private TextView textPasswordRequirements;
     private Button buttonRegister;
 
     @Override
@@ -55,6 +58,14 @@ public class RegisterActivity extends AppCompatActivity {
         editUsername = findViewById(R.id.editUsername);
         editPassword = findViewById(R.id.editPassword);
         editConfirmPassword = findViewById(R.id.editConfirmPassword);
+        textPasswordRequirements = findViewById(R.id.textPasswordRequirements);
+        
+        // Updates the password requirements checklist as the user types
+        editPassword.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { updatePasswordRequirements(s.toString()); }
+            @Override public void afterTextChanged(android.text.Editable s) {}
+        });
 
         buttonRegister = findViewById(R.id.buttonRegister);
         buttonRegister.setOnClickListener(v -> attemptRegister());
@@ -117,17 +128,24 @@ public class RegisterActivity extends AppCompatActivity {
             return;
         }
 
+        // Password must include uppercase, lowercase, number, and symbol
+        if (!password.matches("(?=.*[A-Z])(?=.*[a-z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{8,}")) {
+            editPassword.setError("Password must include uppercase, lowercase, number, and symbol");
+            editPassword.requestFocus();
+            return;
+        }
+
         if (!password.equals(confirmPassword)) {
             editConfirmPassword.setError("Passwords don't match");
             editConfirmPassword.requestFocus();
             return;
         }
 
-        // ---- Save to the database on a background thread ----
+        // Register with auth0 on a background thread
         buttonRegister.setEnabled(false);
         executorService.execute(() -> {
             try {
-                ApiClient.register(fullName,email,username,password,phoneNumber);
+                ApiClient.register(email, username, password);
             
                 runOnUiThread(() -> {
                     buttonRegister.setEnabled(true);
@@ -140,8 +158,8 @@ public class RegisterActivity extends AppCompatActivity {
                     String message = e.getMessage();
                     
                     if(message != null && message.contains("USERNAME_TAKEN")) {
-                            editUsername.setError("That username is already taken");
-                            editUsername.requestFocus();
+                        editUsername.setError("That username is already taken");
+                        editUsername.requestFocus();
                     } else if (message != null && message.contains("EMAIL_TAKEN")) {
                             editEmail.setError("An account with this email already exists");
                             editEmail.requestFocus();
@@ -160,6 +178,17 @@ public class RegisterActivity extends AppCompatActivity {
             }
             
         });
+    }
+
+    // Updates the password requirements checklist as the user types
+    private void updatePasswordRequirements(String password) {
+        textPasswordRequirements.setText(
+            (password.length() >= MIN_PASSWORD_LENGTH ? "✓" : "☐") + " At least 8 characters\n"
+            + (password.matches(".*[A-Z].*") ? "✓" : "☐") + " One uppercase letter\n"
+            + (password.matches(".*[a-z].*") ? "✓" : "☐") + " One lowercase letter\n"
+            + (password.matches(".*\\d.*") ? "✓" : "☐") + " One number\n"
+            + (password.matches(".*[^A-Za-z0-9].*") ? "✓" : "☐") + " One symbol"
+        );
     }
 
     /** Turns "MM/DD/YYYY" into "YYYY-MM-DD" for the database, or returns null if it's not a real past date. */
