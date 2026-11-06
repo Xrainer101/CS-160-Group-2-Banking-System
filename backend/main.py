@@ -291,3 +291,75 @@ def get_me(user=Depends(get_current_user)):
         "email": user["email"],
         "username": user["username"]
     }
+
+
+@app.get("/api/accounts")
+def get_accounts_data():
+    bank_account_dao = jpype.JClass("database.BankAccountDAO")
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    java_accounts = bank_account_dao.getBankAccountsByUsername("john_doe")
+
+    accounts = []
+    transactions = []
+    account_type_labels = {
+        "checking": "Everyday Checking",
+        "savings": "High-Yield Savings",
+    }
+    transaction_labels = {
+        "deposit": ("Deposit", "Income", "ArrowDownLeft", 1),
+        "withdrawal": ("Withdrawal", "Expense", "CircleDollarSign", -1),
+        "transfer_in": ("Transfer received", "Transfer", "ArrowLeftRight", 1),
+        "transfer_out": ("Transfer sent", "Transfer", "ArrowLeftRight", -1),
+    }
+
+    for account in java_accounts:
+        account_id = int(account.getAccountId())
+        account_number = str(account.getAccountNumber())
+        account_type = str(account.getAccountType()).lower()
+        balance = float(account.getBalance())
+        accounts.append(
+            {
+                "id": account_id,
+                "type": account_type_labels.get(account_type, account_type.title()),
+                "number": f"•••• {account_number[-4:]}",
+                "balance": balance,
+                "available": balance,
+                "color": "purple" if account_type == "savings" else "blue",
+                "account_type": account_type,
+                "status": str(account.getStatus()),
+            }
+        )
+
+        java_transactions = transaction_dao.getTransactionsByAccountNumber(account_number)
+        for transaction in java_transactions:
+            transaction_type = str(transaction.getTransactionType()).lower()
+            name, category, icon, direction = transaction_labels.get(
+                transaction_type,
+                (transaction_type.replace("_", " ").title(), "Other", "CircleDollarSign", 1),
+            )
+            timestamp = str(transaction.getTimestamp())
+            transaction_date = datetime.fromisoformat(timestamp)
+            transactions.append(
+                {
+                    "id": int(transaction.getTransactionId()),
+                    "name": name,
+                    "category": category,
+                    "date": (
+                        f"{transaction_date:%b} "
+                        f"{transaction_date.day}, {transaction_date.year}"
+                    ),
+                    "timestamp": timestamp,
+                    "amount": direction * abs(float(transaction.getAmount())),
+                    "account": account_id,
+                    "transaction_type": transaction_type,
+                    "icon": icon,
+                }
+            )
+
+    accounts.sort(key=lambda account: account["id"])
+    transactions.sort(key=lambda transaction: transaction["timestamp"], reverse=True)
+
+    return {
+        "accounts": accounts,
+        "transactions": transactions,
+    }

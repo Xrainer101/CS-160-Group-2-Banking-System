@@ -1,7 +1,26 @@
+import { useState, useEffect } from 'react';
 import AccountsOverview from '../components/AccountsOverview';
 import { TransactionRows } from '../components/RecentTransactions';
 import { money } from '../data/mockData';
-export default function Accounts({ accounts, transactions }) {
+import { fetchData } from '../api';
+export default function Accounts() {
+
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchData('/accounts')
+      .then(res => {
+        setData(res);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div>Loading data...</div>;
+  if (!data) return <div>Failed to load data.</div>;
+  const accounts = data.accounts
+  const transactions = data.transactions
   return (
     <>
       <div className="page-heading">
@@ -13,19 +32,23 @@ export default function Accounts({ accounts, transactions }) {
       <section className="panel">
         <h2>Account summary</h2>
         <div className="summary-list">
-          {accounts.map((a) => (
-            <div key={a.id} className="summary-row">
-              <span>
-                {a.type} <small>{a.number}</small>
-              </span>
-              <strong>{money(a.balance)}</strong>
-            </div>
-          ))}
+          {!accounts ? (
+            <p className="empty">No accounts found.</p>
+          ) : (
+            accounts.map((a) => (
+              <div key={a.id} className="summary-row">
+                <span>
+                  {a.type} <small>{a.number}</small>
+                </span>
+                <strong>{money(a.balance)}</strong>
+              </div>
+            ))
+          )}
         </div>
       </section>
       <section className="panel">
         <h2>Latest activity</h2>
-        <TransactionRows transactions={transactions.slice(0, 5)} />
+        <TransactionRows transactions={transactions} />
       </section>
     </>
   );

@@ -13,9 +13,14 @@ export default function AccountsOverview({ accounts }) {
         </Link>
       </div>
       <div className="accounts-grid">
-        {accounts.map((a) => (
-          <AccountCard key={a.id} account={a} />
-        ))}
+        {!accounts ? (
+          <p className="empty">No accounts found.</p>
+        ) : (
+          accounts.map((a) => (
+            <AccountCard key={a.id} account={a} />
+          ))
+        )}
+        
       </div>
     </section>
   );
