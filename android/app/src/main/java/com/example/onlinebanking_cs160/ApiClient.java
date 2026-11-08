@@ -1,6 +1,7 @@
 package com.example.onlinebanking_cs160;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -10,6 +11,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.net.URLEncoder;
+import java.util.List;
 
 public final class ApiClient {
     private static final String BASE_URL = "http://10.0.2.2:8000";
@@ -153,6 +155,40 @@ public final class ApiClient {
         throw new ApiException(statusCode,message);
     }
 
+    // Gets the authenticated user's accounts and transactions from the backend
+    public static AccountsResponse getAccounts(String token) throws Exception {
+        URL url = new URL(BASE_URL + "/api/accounts");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+
+        connection.setRequestMethod("GET");
+        connection.setRequestProperty("Authorization", "Bearer " + token);
+        int statusCode = connection.getResponseCode();
+
+        InputStream responseStream = statusCode >= 200 && statusCode < 300
+            ? connection.getInputStream() : connection.getErrorStream();
+        JSONObject responseJson = new JSONObject(readResponse(responseStream));
+
+        if (statusCode < 200 || statusCode >= 300) {
+            String message = responseJson.optString("detail", "Could not get accounts");
+            throw new ApiException(statusCode, message);
+        }
+        List<BankAccount> accounts = new java.util.ArrayList<>();
+        JSONArray accountArray = responseJson.optJSONArray("accounts");
+        if (accountArray != null) {
+            for (int i = 0; i < accountArray.length(); i++) {
+                JSONObject account = accountArray.getJSONObject(i);
+                accounts.add(new BankAccount(
+                    account.getString("type"),
+                    account.getString("number"),
+                    account.getDouble("balance"),
+                    account.getDouble("available"),
+                    account.getString("status")
+                ));
+            }
+        }
+        return new AccountsResponse(accounts);
+    }
+
     // Registers a user in auth0
     public static void register(
         String email,
@@ -176,7 +212,6 @@ public final class ApiClient {
         try (OutputStream outputStream = connection.getOutputStream()) {
             outputStream.write(requestBody.toString().getBytes(StandardCharsets.UTF_8));
         }
-
         int statusCode = connection.getResponseCode();
 
         if (statusCode < 200 || statusCode >= 300) {
@@ -284,6 +319,28 @@ public final class ApiClient {
             this.name=name;
             this.email=email;
             this.username=username;
+        }
+    }
+    public static class AccountsResponse {
+        public final java.util.List<BankAccount> accounts;
+
+        public AccountsResponse(java.util.List<BankAccount> accounts) {
+            this.accounts = accounts;
+        }
+    }
+    public static class BankAccount {
+        public final String type;
+        public final String number;
+        public final double balance;
+        public final double available;
+        public final String status;
+
+        public BankAccount(String type, String number, double balance, double available, String status) {
+            this.type = type;
+            this.number = number;
+            this.balance = balance;
+            this.available = available;
+            this.status = status;
         }
     }
 }

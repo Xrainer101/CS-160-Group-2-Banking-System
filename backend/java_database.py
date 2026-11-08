@@ -21,20 +21,10 @@ DEMO_TRANSACTIONS = (
     ("savings", "deposit", 200.00),
 )
 
-
-def _seed_demo_data() -> None:
-    user_dao = jpype.JClass("database.UserDAO")
+def create_default_accounts(user_id: int) -> dict[str, str]:
     bank_account_dao = jpype.JClass("database.BankAccountDAO")
-    transaction_dao = jpype.JClass("database.TransactionDAO")
-    user_id = user_dao.getUserIdByUsername("john_doe")
-    if user_id < 0:
-        raise RuntimeError("The john_doe demo user could not be found.")
-
-    existing_accounts = bank_account_dao.getBankAccountsByUsername("john_doe")
-    if not existing_accounts.isEmpty():
-        return
-
     account_numbers = {}
+
     for account_type, opening_balance in DEMO_ACCOUNTS:
         account_number = bank_account_dao.createBankAccount(
             user_id,
@@ -42,8 +32,23 @@ def _seed_demo_data() -> None:
             opening_balance,
         )
         if account_number is None:
-            raise RuntimeError(f"Failed to create the demo {account_type} account.")
+            raise RuntimeError(f"Failed to create the default {account_type} account.")
         account_numbers[account_type] = str(account_number)
+    return account_numbers
+
+def _seed_demo_data() -> None:
+    user_dao = jpype.JClass("database.UserDAO")
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    user_id = user_dao.getUserIdByUsername("john_doe")
+    if user_id < 0:
+        raise RuntimeError("The john_doe demo user could not be found.")
+
+    bank_account_dao = jpype.JClass("database.BankAccountDAO")
+    existing_accounts = bank_account_dao.getBankAccountsByUsername("john_doe")
+    if not existing_accounts.isEmpty():
+        return
+
+    account_numbers = create_default_accounts(user_id)
 
     for account_type, operation, amount in DEMO_TRANSACTIONS:
         succeeded = getattr(transaction_dao, operation)(

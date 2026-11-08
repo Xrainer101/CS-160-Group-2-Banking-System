@@ -32,6 +32,43 @@ public class UserDAO {
         }
     }
 
+    // --- Registering an Auth0 User ---
+    public static User registerAuth0User(String auth0Sub, String username, String firstName, String lastName, String email, String phoneNumber) {
+        String userSql = "INSERT INTO users (username, first_name, last_name, email, phone_number, password_hash) VALUES (?, ?, ?, ?, ?, ?)";
+        String identitySql = "INSERT INTO auth0_identities (auth0_sub, user_id) VALUES (?, ?)";
+
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+
+            try (PreparedStatement userStatement = conn.prepareStatement(userSql, Statement.RETURN_GENERATED_KEYS)) {
+                userStatement.setString(1, username);
+                userStatement.setString(2, firstName);
+                userStatement.setString(3, lastName);
+                userStatement.setString(4, email);
+                userStatement.setString(5, phoneNumber);
+                userStatement.setString(6, "auth0-managed");
+                userStatement.executeUpdate();
+
+                try (ResultSet generatedKeys = userStatement.getGeneratedKeys()) {
+                    if (!generatedKeys.next()) {
+                        conn.rollback();
+                        return null;
+                    }
+                    try (PreparedStatement identityStatement = conn.prepareStatement(identitySql)) {
+                        identityStatement.setString(1, auth0Sub);
+                        identityStatement.setInt(2, generatedKeys.getInt(1));
+                        identityStatement.executeUpdate();
+                    }
+                }
+            }
+            conn.commit();
+        } catch (SQLException e) {
+            System.out.println("Auth0 user registration failed: " + e.getMessage());
+            return null;
+        }
+        return getUserByAuth0Sub(auth0Sub);
+    }
+
     public static User getUserByUsername(String targetUsername) {
         String sql = "SELECT user_id, username, first_name, last_name, email, phone_number, password_hash, role, failed_login_attempts, lockout_until, created_at FROM users WHERE username = ?";
 
@@ -63,7 +100,7 @@ public class UserDAO {
                         + ", Role: " + role
                         + ", Failed Logins: " + failedAttempts);
 
-                    return new User(id, user, firstName, lastName, email, phone, password_hash, role, failedAttempts, lockout_until, created_at);
+                    return userFromResultSet(rs);
                 } else {
                     System.out.println("No user found with username: " + targetUsername);
                 }
@@ -72,8 +109,69 @@ public class UserDAO {
         } catch (SQLException e) {
             System.out.println("Query execution error: " + e.getMessage());
         }
-
         return null;
+    }
+
+    // --- Finds a banking user by their Auth0 identifier ---
+    public static User getUserByAuth0Sub(String auth0Sub) {
+        String sql = "SELECT u.user_id, u.username, u.first_name, u.last_name, u.email, " +
+            "u.phone_number, u.password_hash, u.role, u.failed_login_attempts, " +
+            "u.lockout_until, u.created_at " +
+            "FROM users u JOIN auth0_identities ai ON ai.user_id = u.user_id " +
+            "WHERE ai.auth0_sub = ?";
+
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, auth0Sub);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                return rs.next() ? userFromResultSet(rs) : null;
+            }
+        } catch (SQLException e) {
+            System.out.println("Error finding Auth0 user: " + e.getMessage());
+            return null;
+        }
+    }
+    // --- Links an Auth0 identifier to an existing banking user using email only for first-time linking ---
+    public static User linkAuth0SubByEmail(String auth0Sub, String email) {
+        User alreadyLinked = getUserByAuth0Sub(auth0Sub);
+        if (alreadyLinked != null) return alreadyLinked;
+
+        String findUserSql = "SELECT user_id FROM users WHERE lower(email) = lower(?)";
+        String linkSql = "INSERT INTO auth0_identities (auth0_sub, user_id) VALUES (?, ?)";
+
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement findUser = conn.prepareStatement(findUserSql)) {
+            findUser.setString(1, email);
+            try (ResultSet rs = findUser.executeQuery()) {
+                if (!rs.next()) return null;
+
+                int userId = rs.getInt("user_id");
+                try (PreparedStatement link = conn.prepareStatement(linkSql)) {
+                    link.setString(1, auth0Sub);
+                    link.setInt(2, userId);
+                    link.executeUpdate();
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println("Error linking Auth0 user: " + e.getMessage());
+            return null;
+        }
+        return getUserByAuth0Sub(auth0Sub);
+    }
+    private static User userFromResultSet(ResultSet rs) throws SQLException {
+        return new User(
+            rs.getInt("user_id"),
+            rs.getString("username"),
+            rs.getString("first_name"),
+            rs.getString("last_name"),
+            rs.getString("email"),
+            rs.getString("phone_number"),
+            rs.getString("password_hash"),
+            rs.getString("role"),
+            rs.getInt("failed_login_attempts"),
+            rs.getObject("lockout_until", LocalDateTime.class),
+            rs.getObject("created_at", LocalDateTime.class)
+        );
     }
 
     /**

@@ -55,6 +55,15 @@ public class SessionManager {
         prefs.edit().putString(KEY_TOKEN,token).putString(KEY_DISPLAY_NAME,displayName).apply();
     }
 
+    // Saves the Auth0 token together with the backend banking user.
+    public void login(String token, long userId, String displayName) {
+        prefs.edit()
+            .putString(KEY_TOKEN, token)
+            .putLong(KEY_USER_ID, userId)
+            .putString(KEY_DISPLAY_NAME, displayName)
+            .apply();
+    }
+
     // returns the display name of the logged in user
     public String getDisplayName() {
         return prefs.getString(KEY_DISPLAY_NAME, " ");

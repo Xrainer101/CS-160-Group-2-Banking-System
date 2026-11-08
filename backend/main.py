@@ -1,9 +1,12 @@
 # backend/main.py
 import os
 import sqlite3
+import json
+from urllib.request import Request, urlopen
 from datetime import datetime, timedelta, timezone
 import bcrypt   # For securely hashing passwords
 import jwt      # For creating and verifying JSON Web Tokens (JWTs)
+from jwt import PyJWKClient  # Gets Auth0's public keys for token validation
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware  # Backend and frontend communication
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer   # Bearer Token authentication
@@ -17,6 +20,11 @@ DATABASE_PATH = os.getenv(
 )
 # Security settings
 JWT_SECRET = "local-development-secret-key-for-testing-only"
+AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN")
+AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE")
+AUTH0_ISSUER = f"https://{AUTH0_DOMAIN}/" if AUTH0_DOMAIN else ""
+AUTH0_JWKS_URL = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json" if AUTH0_DOMAIN else ""
+auth0_jwks_client = PyJWKClient(AUTH0_JWKS_URL) if AUTH0_JWKS_URL else None
 LOCKOUT_LIMIT = 10
 LOCKOUT_MINUTES = 15
 
@@ -106,35 +114,132 @@ def create_token(user_id: int) -> str:  # Creates authentication token for a use
 # Bearer Authentication
 security = HTTPBearer()
 
-# Current User Function
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    database: sqlite3.Connection = Depends(get_database)
-):
+# Auth0 token validation
+def validate_auth0_token(token: str):
+    if auth0_jwks_client is None:
+        raise Exception("Auth0 is not configured")
+    signing_key = auth0_jwks_client.get_signing_key_from_jwt(token).key
+
+    return jwt.decode( # Decodes and validates the Auth0 token
+        token,
+        signing_key,
+        algorithms=["RS256"],
+        audience=AUTH0_AUDIENCE,
+        issuer=AUTH0_ISSUER
+    )
+
+# Get Auth0 user profile
+def get_auth0_userinfo(token: str):
+    userinfo_url = f"https://{AUTH0_DOMAIN}/userinfo"
+    request = Request(
+        userinfo_url,
+        headers={"Authorization": f"Bearer {token}"}
+    )
     try:
-        # Validates the token and extracts the user ID
-        token_data = jwt.decode(
-            credentials.credentials,
-            JWT_SECRET,
-            algorithms=["HS256"]
+        with urlopen(request, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Unable to retrieve Auth0 user profile: {e}"
         )
-        user_id = int(token_data["sub"])
-    # If token bad retrieve the logged in user and check if the user exists in the database
+
+# Link Auth0 user to banking user
+def link_auth0_user(token_data):
+    """Resolve Auth0 subject to a Java banking user and creating one if needed."""
+    user_dao = jpype.JClass("database.UserDAO")
+    auth0_sub = token_data["sub"]
+    banking_user = user_dao.getUserByAuth0Sub(auth0_sub)
+    if banking_user is None and token_data.get("email"):
+        banking_user = user_dao.linkAuth0SubByEmail(
+            auth0_sub,
+            token_data["email"]
+        )
+    # If no banking user exists then create one
+    if banking_user is None:
+        email = token_data.get("email")
+        if not email:
+            raise HTTPException(
+                status_code=400,
+                detail="Auth0 token is missing email needed to create a banking profile"
+            )
+        full_name = str(token_data.get("name") or "").strip()
+        name_parts = full_name.split(maxsplit=1)
+        first_name = str(token_data.get("given_name") or (name_parts[0] if name_parts else "Auth0"))
+        last_name = str(token_data.get("family_name") or (name_parts[1] if len(name_parts) > 1 else "User"))
+        email_name = str(email).split("@", 1)[0]
+        subject_name = auth0_sub.split("|", 1)[-1][:8]
+        username = f"{email_name}_{subject_name}"[:30]
+        phone_number = f"auth0:{auth0_sub}"
+
+        banking_user = user_dao.registerAuth0User(
+            auth0_sub,
+            username,
+            first_name,
+            last_name,
+            email,
+            phone_number,
+        )
+        if banking_user is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Unable to create a banking profile for this Auth0 account"
+            )
+        from java_database import create_default_accounts
+        create_default_accounts(int(banking_user.getUserId()))
+
+    return {
+        "user_id": int(banking_user.getUserId()),
+        "username": str(banking_user.getUsername()),
+        "name": f"{banking_user.getFirstName()} {banking_user.getLastName()}",
+        "email": str(banking_user.getEmail())
+    }
+
+# Check Auth0 token
+@app.get("/api/auth/token-check")
+def check_auth0_token(credentials: HTTPAuthorizationCredentials = Depends(security)): # Checks if the Auth0 token is valid
+    try:
+        token_data = validate_auth0_token(credentials.credentials)
     except Exception:
         raise HTTPException(
             status_code=401,
-            detail="Invalid or expired token"
+            detail="Invalid or expired Auth0 token"
         )
-    user = database.execute(
-        "SELECT user_id, name, email, username FROM users WHERE user_id = ?",
-        (user_id,)
-    ).fetchone()
-    if user is None:
+
+    return {
+        "message": "Auth0 token is valid",
+        "auth0_user_id": token_data["sub"]
+    }
+
+# Current Auth0 user
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        token_data = validate_auth0_token(credentials.credentials)
+    except Exception:
         raise HTTPException(
             status_code=401,
-            detail="User not found"
+            detail="Invalid or expired Auth0 token"
         )
-    return user
+
+    if not token_data.get("sub"):
+        raise HTTPException(
+            status_code=401,
+            detail="Auth0 token is missing a user identity"
+        )
+
+    if not token_data.get("email"):
+        userinfo = get_auth0_userinfo(credentials.credentials)
+        if userinfo.get("sub") != token_data["sub"]:
+            raise HTTPException(
+                status_code=401,
+                detail="Auth0 user profile does not match the access token"
+            )
+        token_data.update(userinfo)
+
+    return {
+        "auth0": token_data,
+        "banking_user": link_auth0_user(token_data)
+    }
 
 # Basic test endpoint
 @app.get("/api/data")
@@ -285,19 +390,21 @@ def login(
 # Get the currently logged-in user
 @app.get("/api/auth/me")
 def get_me(user=Depends(get_current_user)):
+    banking_user = user["banking_user"]
     return {
-        "user_id": user["user_id"],
-        "name": user["name"],
-        "email": user["email"],
-        "username": user["username"]
+        "auth0_user_id": user["auth0"]["sub"],
+        "user_id": banking_user["user_id"],
+        "name": banking_user["name"],
+        "email": banking_user["email"],
+        "username": banking_user["username"]
     }
 
-
 @app.get("/api/accounts")
-def get_accounts_data():
+def get_accounts_data(user=Depends(get_current_user)):
     bank_account_dao = jpype.JClass("database.BankAccountDAO")
     transaction_dao = jpype.JClass("database.TransactionDAO")
-    java_accounts = bank_account_dao.getBankAccountsByUsername("john_doe")
+    banking_username = user["banking_user"]["username"]
+    java_accounts = bank_account_dao.getBankAccountsByUsername(banking_username)
 
     accounts = []
     transactions = []

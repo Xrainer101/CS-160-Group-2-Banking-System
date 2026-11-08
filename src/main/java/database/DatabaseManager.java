@@ -40,6 +40,13 @@ public class DatabaseManager {
 
             System.out.println("Users table created successfully.");
 
+            // Maps an Auth0 identity to an existing banking user
+            String createAuth0IdentitiesTable = "CREATE TABLE IF NOT EXISTS auth0_identities (" +
+                "auth0_sub TEXT PRIMARY KEY," +
+                "user_id INTEGER NOT NULL UNIQUE," +
+                "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE);";
+            stmt.execute(createAuth0IdentitiesTable);
+
             // Create Bank Accounts Table
             String createAccountsTable = "CREATE TABLE IF NOT EXISTS bank_accounts (" +
                 "account_id INTEGER PRIMARY KEY AUTOINCREMENT," +

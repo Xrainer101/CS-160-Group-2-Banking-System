@@ -75,9 +75,10 @@ public class MainActivity extends AppCompatActivity {
         executorService.execute(() -> {
             try {
                 ApiClient.LoginResult result = ApiClient.login(username, password);
+                ApiClient.UserProfile profile = ApiClient.getCurrentUser(result.accessToken);
                 runOnUiThread(() -> {
                     binding.buttonLogin.setEnabled(true);
-                    session.login(result.accessToken, username);
+                    session.login(result.accessToken, profile.userId, profile.name);
                     goToHome();
                 });
             } catch (ApiClient.MfaRequiredException e) { // Multi-factor authentication is required for this account
@@ -238,9 +239,10 @@ public class MainActivity extends AppCompatActivity {
         executorService.execute(() -> {
             try {
                 ApiClient.LoginResult result = ApiClient.completeMfaLogin(mfaToken, otp);
+                ApiClient.UserProfile profile = ApiClient.getCurrentUser(result.accessToken);
                 runOnUiThread(() -> {
                     binding.buttonLogin.setEnabled(true);
-                    session.login(result.accessToken, username);
+                    session.login(result.accessToken, profile.userId, profile.name);
                     goToHome();
                 });
             } catch (Exception e) {
