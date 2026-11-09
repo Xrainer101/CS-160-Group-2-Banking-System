@@ -110,6 +110,16 @@
   color: #8b99ac;
   font-size: 0.8rem;
 }
+.forgot-password {
+  border: 0;
+  background: transparent;
+  color: #2557c8;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 0;
+  cursor: pointer;
+}
 .inline-check {
   display: flex;
   align-items: center;
