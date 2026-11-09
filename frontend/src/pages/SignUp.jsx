@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom';
 import { Landmark, ShieldCheck } from 'lucide-react';
 export default function SignUp({ onSignIn }) {
   const [name, setName] = useState(''),
+    [username, setUsername] = useState(''),
     [email, setEmail] = useState(''),
+    [dateOfBirth, setDateOfBirth] = useState(''),
+    [phone, setPhone] = useState(''),
     [password, setPassword] = useState(''),
     [confirm, setConfirm] = useState(''),
-    [agree, setAgree] = useState(false),
     [error, setError] = useState('');
   function submit(e) {
     e.preventDefault();
@@ -16,10 +18,6 @@ export default function SignUp({ onSignIn }) {
     }
     if (password !== confirm) {
       setError('Passwords do not match.');
-      return;
-    }
-    if (!agree) {
-      setError('Please acknowledge the demo terms.');
       return;
     }
     onSignIn(email);
@@ -45,9 +43,9 @@ export default function SignUp({ onSignIn }) {
       </div>
       <div className="auth-main">
         <div className="auth-card">
-          <span className="eyebrow">JOIN THE DEMO</span>
-          <h2>Create a demo account</h2>
-          <p>Use fictional details; nothing is saved to a server.</p>
+          <span className="eyebrow">GET STARTED</span>
+          <h2>Open an account</h2>
+          <p>Fill in your details to set up online banking.</p>
           <form className="stacked-form" onSubmit={submit}>
             <label>
               Full name
@@ -59,13 +57,45 @@ export default function SignUp({ onSignIn }) {
               />
             </label>
             <label>
+              Date of birth
+              <input
+                required
+                type="date"
+                value={dateOfBirth}
+                onChange={(e) => setDateOfBirth(e.target.value)}
+              />
+            </label>
+            <label>
               Email address
               <input
                 required
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
+                placeholder="name@email.com"
+              />
+            </label>
+            <label>
+              Phone number
+              <input
+                required
+                type="tel"
+                autoComplete="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="(555) 000-0000"
+              />
+            </label>
+            <label>
+              Username
+              <input
+                required
+                type="text"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Choose a username"
               />
             </label>
             <label>
@@ -85,16 +115,8 @@ export default function SignUp({ onSignIn }) {
                 type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
-                placeholder="Confirm password"
+                placeholder="Re-enter your password"
               />
-            </label>
-            <label className="inline-check">
-              <input
-                type="checkbox"
-                checked={agree}
-                onChange={(e) => setAgree(e.target.checked)}
-              />{' '}
-              I understand this is a frontend-only demo.
             </label>
             {error && (
               <p className="form-error" role="alert">
@@ -102,11 +124,11 @@ export default function SignUp({ onSignIn }) {
               </p>
             )}
             <button className="button button-primary full">
-              Create demo account
+              Create account
             </button>
           </form>
           <p className="auth-switch">
-            Already have access? <Link to="/signin">Sign in</Link>
+            Already have an account? <Link to="/signin">Sign in</Link>
           </p>
           <div className="auth-disclaimer">
             Never enter a real banking password in this prototype.
