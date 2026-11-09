@@ -2,12 +2,12 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Landmark, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 export default function SignIn({ onSignIn }) {
-  const [email, setEmail] = useState('demo@team2bank.com'),
+  const [username, setUsername] = useState(''),
     [password, setPassword] = useState(''),
     [show, setShow] = useState(false);
   function submit(e) {
     e.preventDefault();
-    if (email && password) onSignIn(email, password);
+    if (username && password) onSignIn(username, password);
   }
   return (
     <div className="auth-page">
@@ -31,18 +31,18 @@ export default function SignIn({ onSignIn }) {
       <div className="auth-main">
         <div className="auth-card">
           <span className="eyebrow">WELCOME BACK</span>
-          <h2>Sign in to your account</h2>
-          <p>Enter any email and password to explore the demo.</p>
+          <h2>Log in to your account</h2>
+          <p>Check your balances, move money and pay bills.</p>
           <form className="stacked-form" onSubmit={submit}>
             <label>
-              Email address
+              Username
               <input
-                // type="email"
+                type="text"
                 required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Enter your username"
               />
             </label>
             <label>
@@ -54,7 +54,7 @@ export default function SignIn({ onSignIn }) {
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter any demo password"
+                  placeholder="Enter your password"
                 />
                 <button
                   type="button"
@@ -66,20 +66,20 @@ export default function SignIn({ onSignIn }) {
               </div>
             </label>
             <div className="auth-options">
+              {/*
               <label className="inline-check">
                 <input type="checkbox" /> Remember me
               </label>
-              <span>Demo access</span>
+              */}
+              <button type="button" className="forgot-password">
+                Forgot password?
+              </button>
             </div>
             <button className="button button-primary full">Sign in</button>
           </form>
           <p className="auth-switch">
-            New here? <Link to="/signup">Create an account</Link>
+            Don't have an account? <Link to="/signup">Register</Link>
           </p>
-          <div className="auth-disclaimer">
-            Demo only: no passwords are stored or verified. Do not enter a real
-            password.
-          </div>
         </div>
       </div>
     </div>
