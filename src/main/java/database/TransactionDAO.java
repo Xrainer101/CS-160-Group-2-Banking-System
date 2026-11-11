@@ -146,6 +146,10 @@ public class TransactionDAO {
      * Public method to transfer money between two accounts atomically.
      */
     public static boolean transfer(String fromAccountNumber, String toAccountNumber, double amount) {
+        return transfer(fromAccountNumber, toAccountNumber, amount, null);
+    }
+
+    public static boolean transfer(String fromAccountNumber, String toAccountNumber, double amount, String scheduledFor) {
         if (fromAccountNumber.equals(toAccountNumber)) {
             System.out.println("Transfer failed: Cannot transfer money to the same account.");
             return false;
@@ -154,16 +158,24 @@ public class TransactionDAO {
         try (Connection conn = DatabaseManager.getConnection()) {
             conn.setAutoCommit(false); // START TRANSACTION
             try {
-                // Execute both operations on the same connection.
-                processWithdrawal(conn, fromAccountNumber, amount); //  Withdrawal from source account
-                logTransaction(conn, fromAccountNumber, "transfer_out", amount, toAccountNumber, "completed", null);
-
-                processDeposit(conn, toAccountNumber, amount); // Deposit in target account
-                logTransaction(conn, toAccountNumber, "transfer_in", amount, fromAccountNumber, "completed", null);
+                if (scheduledFor == null) {
+                    // IMMEDIATE: Move the money right now and log as completed
+                    processWithdrawal(conn, fromAccountNumber, amount); //  Withdrawal from source account
+                    TransactionDAO.logTransaction(conn, fromAccountNumber, "transfer_out", amount, toAccountNumber, "completed", null);
+                    
+                    processDeposit(conn, toAccountNumber, amount); // Deposit in target account
+                    TransactionDAO.logTransaction(conn, toAccountNumber, "transfer_in", amount, fromAccountNumber, "completed", null);
+                    
+                    System.out.println("Successfully transferred $" + String.format("%.2f", amount) + " immediately.");
+                } else {
+                    // SCHEDULED: Do NOT move the money. Just log the intent as pending.
+                    TransactionDAO.logTransaction(conn, fromAccountNumber, "transfer_out", amount, toAccountNumber, "pending", scheduledFor);
+                    TransactionDAO.logTransaction(conn, toAccountNumber, "transfer_in", amount, fromAccountNumber, "pending", scheduledFor);
+                    
+                    System.out.println("Transfer of $" + String.format("%.2f", amount) + " scheduled for " + scheduledFor + ".");
+                }
                 
                 conn.commit(); // SAVE TRANSACTION
-                System.out.println("Successfully transferred $" + String.format("%.2f", amount) + 
-                                   " from #" + fromAccountNumber + " to #" + toAccountNumber);
                 return true;
             } catch (SQLException e) {
                 conn.rollback(); // CANCEL TRANSACTION
