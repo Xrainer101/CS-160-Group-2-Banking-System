@@ -12,8 +12,8 @@ public class TransactionDAO {
 /**
      * Private helper to log a transaction record on an active connection.
      */
-    private static void logTransaction(Connection conn, String accountNumber, String type, double amount, String relatedAccount) throws SQLException {
-        String sql = "INSERT INTO transactions (account_number, transaction_type, amount, related_account) VALUES (?, ?, ?, ?)";
+    private static void logTransaction(Connection conn, String accountNumber, String type, double amount, String relatedAccount, String status, String scheduledFor) throws SQLException {
+        String sql = "INSERT INTO transactions (account_number, transaction_type, amount, related_account, status, scheduled_for) VALUES (?, ?, ?, ?, ?, ?)";
         
         try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, accountNumber);
@@ -25,6 +25,11 @@ public class TransactionDAO {
             } else {
                 pstmt.setNull(4, Types.VARCHAR); // Handles standard deposits/withdrawals
             }
+
+            pstmt.setString(5, status);
+        
+            if (scheduledFor != null) pstmt.setString(6, scheduledFor);
+            else pstmt.setNull(6, java.sql.Types.VARCHAR); // SQLite will use DEFAULT CURRENT_TIMESTAMP
             
             pstmt.executeUpdate();
         }
@@ -99,7 +104,7 @@ public class TransactionDAO {
             conn.setAutoCommit(false); // START TRANSACTION
             try {
                 processDeposit(conn, accountNumber, amount);
-                logTransaction(conn, accountNumber, "deposit", amount, null); // Log it
+                logTransaction(conn, accountNumber, "deposit", amount, null, "completed", null); // Log it
 
                 conn.commit(); // SAVE TRANSACTION
                 System.out.println("Successfully deposited $" + String.format("%.2f", amount) + " to #" + accountNumber);
@@ -122,7 +127,7 @@ public class TransactionDAO {
             conn.setAutoCommit(false); // START TRANSACTION
             try {
                 processWithdrawal(conn, accountNumber, amount);
-                logTransaction(conn, accountNumber, "withdrawal", amount, null); // Log it
+                logTransaction(conn, accountNumber, "withdrawal", amount, null, "completed", null); // Log it
 
                 conn.commit(); // SAVE TRANSACTION
                 System.out.println("Successfully withdrew $" + String.format("%.2f", amount) + " from #" + accountNumber);
@@ -151,10 +156,10 @@ public class TransactionDAO {
             try {
                 // Execute both operations on the same connection.
                 processWithdrawal(conn, fromAccountNumber, amount); //  Withdrawal from source account
-                logTransaction(conn, fromAccountNumber, "transfer_out", amount, toAccountNumber);
+                logTransaction(conn, fromAccountNumber, "transfer_out", amount, toAccountNumber, "completed", null);
 
                 processDeposit(conn, toAccountNumber, amount); // Deposit in target account
-                logTransaction(conn, toAccountNumber, "transfer_in", amount, fromAccountNumber);
+                logTransaction(conn, toAccountNumber, "transfer_in", amount, fromAccountNumber, "completed", null);
                 
                 conn.commit(); // SAVE TRANSACTION
                 System.out.println("Successfully transferred $" + String.format("%.2f", amount) + 
@@ -170,7 +175,7 @@ public class TransactionDAO {
         return false;
     }
 
-    // Timed transfers
+    // Scheduled transfers
 
     /**
      * Queries the ledger and prints a chronological bank statement for a specific account.
@@ -179,7 +184,7 @@ public class TransactionDAO {
         List<Transaction> transactions = new ArrayList<>();
 
         // ORDER BY timestamp ASC ensures chronological order (oldest to newest)
-        String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, timestamp " +
+        String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, status, scheduled_for, timestamp " +
                      "FROM transactions WHERE account_number = ? ORDER BY timestamp ASC";
 
         try (Connection conn = DatabaseManager.getConnection();
@@ -201,10 +206,12 @@ public class TransactionDAO {
                     String type = rs.getString("transaction_type");
                     double amount = rs.getDouble("amount");
                     String relatedAcc = rs.getString("related_account");
+                    String status = rs.getString("status");
+                    String scheduledFor = rs.getString("scheduled_for");
                     String timestamp = rs.getString("timestamp");
 
                     // Create the model and add it to the list
-                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, timestamp);
+                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, status, scheduledFor, timestamp);
                     transactions.add(transaction);
 
                     // Determine if money is coming in or going out for formatting
@@ -232,4 +239,6 @@ public class TransactionDAO {
 
         return transactions;
     }
+
+    // Method to edit payments
 }

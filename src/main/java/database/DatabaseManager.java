@@ -63,6 +63,8 @@ public class DatabaseManager {
                 "transaction_type TEXT NOT NULL CHECK(transaction_type IN ('deposit', 'withdrawal', 'transfer_in', 'transfer_out'))," +
                 "amount REAL NOT NULL," +
                 "related_account TEXT DEFAULT NULL," +
+                "status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('pending', 'completed', 'failed', 'cancelled'))," +
+                "scheduled_for DATETIME DEFAULT CURRENT_TIMESTAMP," +
                 "timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
                 "FOREIGN KEY (account_number) REFERENCES bank_accounts(account_number) ON DELETE CASCADE);";
             stmt.execute(createTransactionsTable);
