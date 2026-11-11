@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { BrowserRouter, Navigate, Route, Routes, useNavigate} from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import Footer from './components/Footer';
@@ -11,65 +11,100 @@ import Transactions from './pages/Transactions';
 import Transfers from './pages/Transfers';
 import Cards from './pages/Cards';
 import Settings from './pages/Settings';
-import { initialAccounts, initialTransactions, initialPayments } from './data/mockData';
+import { initialPayments } from './data/mockData';
 import './index.css';
 import './styles/components.css';
 import './styles/dashboard.css';
 import './styles/auth.css';
+import { clearSession, getSession, saveSession } from './auth/authService';
+import { getAccounts, getCurrentUser } from './api/bankingApi';
+
+// Reads the auth0 session and returns the user's name and email
+function userFromSession(session) {
+  const token = session?.id_token;
+  if (!token) return null;
+  try {
+    const encodedPayload = token.split('.')[1];
+    const payload = JSON.parse(
+      atob(encodedPayload.replace(/-/g, '+').replace(/_/g, '/')),
+    );
+    return {
+      name: payload.name || payload.nickname || payload.email,
+      email: payload.email,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function AppContent() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
-  const [accounts, setAccounts] = useState(initialAccounts);
-  const [transactions, setTransactions] = useState(initialTransactions);
+  const [session, setSession] = useState(() => getSession());
+  const [user, setUser] = useState(() => userFromSession(session));
+  const [accounts, setAccounts] = useState([]);
+  const [transactions, setTransactions] = useState([]);
   const [payments, setPayments] = useState(initialPayments);
   const [frozen, setFrozen] = useState(false);
   const [notice, setNotice] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [bankingLoading, setBankingLoading] = useState(false);
+  const [bankingError, setBankingError] = useState('');
+
+  // Load the user's banking data when they log in
+  useEffect(() => {
+    let cancelled = false;
+    if (!session) {
+      setAccounts([]);
+      setTransactions([]);
+      setBankingError('');
+      setBankingLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    // Get user's profile and account information from the API
+    async function loadBankingData() {
+      setBankingLoading(true);
+      setBankingError('');
+      try {
+        const profile = await getCurrentUser();
+        const accountData = await getAccounts();
+        if (cancelled) return;
+        setUser({
+          name: profile.name || 'Banking user',
+          email: profile.email || '',
+        });
+        setAccounts(accountData.accounts || []);
+        setTransactions(accountData.transactions || []);
+      } catch (error) {
+        if (!cancelled) {
+          setBankingError(error.message || 'Unable to load banking data.');
+        }
+      } finally {
+        if (!cancelled) setBankingLoading(false);
+      }
+    }
+
+    loadBankingData();
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
 
   function notify(message) {
     setNotice(message);
     window.setTimeout(() => setNotice(''), 4500);
   }
-  function signIn(email, password) {
-
-    const handleSubmit = async (e) => {
-      try {
-        const response = await fetch("http://localhost:8000/api/auth/login", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            username: email,
-            password: password,
-            
-          }),
-        });
-
-        const data = await response.json();
-        if (!response.ok) {
-          // FastAPI returns 422 Unprocessable Entity if structural validation fails
-          throw new Error(data.detail ? JSON.stringify(data.detail) : "Validation failed");
-        }
-
-        setUser({ name: 'Sachi', email });
-        navigate('/dashboard');
-
-        // setResponseMessage(data.message);
-      } catch (err) {
-        // for now, log in even when fail
-        setUser({ name: 'Sachi', email });
-        navigate('/dashboard');
-      }
-    };
-
-    handleSubmit();
-
-    
-    
+  function handleAuthenticated(result) {
+    if (!result?.session) return;
+    saveSession(result.session);
+    setSession(result.session);
+    setUser(userFromSession(result.session));
+    navigate('/dashboard');
   }
   function signOut() {
+    clearSession();
+    setSession(null);
     setUser(null);
     navigate('/signin');
   }
@@ -166,6 +201,19 @@ function AppContent() {
           </button>
         </div>
       )}
+      {bankingLoading && (
+        <div className="toast" role="status">
+          Loading your banking data...
+        </div>
+      )}
+      {bankingError && (
+        <div className="toast" role="alert">
+          {bankingError}
+          <button onClick={() => setBankingError('')} aria-label="Dismiss">
+            ×
+          </button>
+        </div>
+      )}
       <Routes>
         <Route
           path="/signin"
@@ -173,7 +221,7 @@ function AppContent() {
             user ? (
               <Navigate to="/dashboard" replace />
             ) : (
-              <SignIn onSignIn={signIn} />
+              <SignIn onAuthenticated={handleAuthenticated} />
             )
           }
         />
@@ -183,7 +231,7 @@ function AppContent() {
             user ? (
               <Navigate to="/dashboard" replace />
             ) : (
-              <SignUp onSignIn={signIn} />
+              <SignUp onAuthenticated={handleAuthenticated} />
             )
           }
         />

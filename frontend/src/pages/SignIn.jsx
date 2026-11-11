@@ -1,13 +1,36 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Landmark, ShieldCheck, Eye, EyeOff } from 'lucide-react';
-export default function SignIn({ onSignIn }) {
+import { login, verifyMfa } from '../auth/authService';
+export default function SignIn({ onAuthenticated }) {
   const [username, setUsername] = useState(''),
     [password, setPassword] = useState(''),
-    [show, setShow] = useState(false);
-  function submit(e) {
+    [show, setShow] = useState(false),
+    [mfaToken, setMfaToken] = useState(''),
+    [mfaCode, setMfaCode] = useState(''),
+    [error, setError] = useState(''),
+    [loading, setLoading] = useState(false);
+  async function submit(e) {
     e.preventDefault();
-    if (username && password) onSignIn(username, password);
+    setError('');
+    setLoading(true);
+    try {
+      if (mfaToken) {
+        const result = await verifyMfa(mfaToken, mfaCode);
+        onAuthenticated(result);
+        return;
+      }
+      const result = await login(username, password);
+      if (result.requiresMfa) {
+        setMfaToken(result.mfaToken);
+      } else {
+        onAuthenticated(result);
+      }
+    } catch (err) {
+      setError(err.message || 'Unable to sign in.');
+    } finally {
+      setLoading(false);
+    }
   }
   return (
     <div className="auth-page">
@@ -75,7 +98,33 @@ export default function SignIn({ onSignIn }) {
                 Forgot password?
               </button>
             </div>
-            <button className="button button-primary full">Sign in</button>
+            {mfaToken && (
+              <label>
+                Duo verification code
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  maxLength="6"
+                  required
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value)}
+                  placeholder="Enter your six-digit code"
+                />
+              </label>
+            )}
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
+            <button className="button button-primary full" disabled={loading}>
+              {loading
+                ? 'Please wait...'
+                : mfaToken
+                  ? 'Verify code'
+                  : 'Sign in'}
+            </button>
           </form>
           <p className="auth-switch">
             Don't have an account? <Link to="/signup">Register</Link>
