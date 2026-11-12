@@ -113,6 +113,32 @@ export async function signup(profile) {
     return readResponse(response);
 }
 
+// Ask auth0 to send a password-reset email for user
+export async function requestPasswordReset(email) {
+    const response = await fetch(`https://${domain}/dbconnections/change_password`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({client_id: clientId,email,connection}),
+    });
+
+    const message = await response.text();
+    if (!response.ok) {
+        let details = {};
+        try {
+            details = JSON.parse(message);
+        } catch {
+            details = { error_description: message };
+        }
+        const error = new Error(
+            details.error_description || details.description || details.error || 'Unable to request a password reset.',
+        );
+        error.code = details.error || details.code;
+        error.details = details;
+        throw error;
+    }
+    return { message };
+}
+
 // ---- Session storage and clearing ----
 export function getSession() {
     const saved = sessionStorage.getItem(sessionKey);

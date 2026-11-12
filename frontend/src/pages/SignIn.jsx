@@ -1,15 +1,32 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Landmark, ShieldCheck, Eye, EyeOff } from 'lucide-react';
-import { login, verifyMfa } from '../auth/authService';
+import { login, requestPasswordReset, verifyMfa } from '../auth/authService';
 export default function SignIn({ onAuthenticated }) {
   const [username, setUsername] = useState(''),
     [password, setPassword] = useState(''),
+    [resetEmail, setResetEmail] = useState(''),
+    [resetMode, setResetMode] = useState(false),
+    [resetMessage, setResetMessage] = useState(''),
     [show, setShow] = useState(false),
     [mfaToken, setMfaToken] = useState(''),
     [mfaCode, setMfaCode] = useState(''),
     [error, setError] = useState(''),
     [loading, setLoading] = useState(false);
+  async function submitPasswordReset(e) {
+    e.preventDefault();
+    setError('');
+    setResetMessage('');
+    setLoading(true);
+    try {
+      await requestPasswordReset(resetEmail);
+      setResetMessage('Check your inbox for password reset instructions.');
+    } catch (err) {
+      setError(err.message || 'Unable to request a password reset.');
+    } finally {
+      setLoading(false);
+    }
+  }
   async function submit(e) {
     e.preventDefault();
     setError('');
@@ -54,6 +71,45 @@ export default function SignIn({ onAuthenticated }) {
       <div className="auth-main">
         <div className="auth-card">
           <span className="eyebrow">WELCOME BACK</span>
+          {resetMode && (
+            <form className="stacked-form" onSubmit={submitPasswordReset}>
+              <h2>Reset your password</h2>
+              <p>Enter your email and check your inbox for reset instructions.</p>
+              <label>
+                Email
+                <input
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  placeholder="Enter your email"
+                />
+              </label>
+              {resetMessage && <p role="status">{resetMessage}</p>}
+              {error && (
+                <p className="form-error" role="alert">
+                  {error}
+                </p>
+              )}
+              <button className="button button-primary full" disabled={loading}>
+                {loading ? 'Please wait...' : 'Submit'}
+              </button>
+              <button
+                type="button"
+                className="forgot-password"
+                onClick={() => {
+                  setError('');
+                  setResetMessage('');
+                  setResetMode(false);
+                }}
+              >
+                Back to sign in
+              </button>
+            </form>
+          )}
+          {!resetMode && (
+          <>
           <h2>Log in to your account</h2>
           <p>Check your balances, move money and pay bills.</p>
           <form className="stacked-form" onSubmit={submit}>
@@ -94,7 +150,15 @@ export default function SignIn({ onAuthenticated }) {
                 <input type="checkbox" /> Remember me
               </label>
               */}
-              <button type="button" className="forgot-password">
+              <button
+                type="button"
+                className="forgot-password"
+                onClick={() => {
+                  setError('');
+                  setResetMessage('');
+                  setResetMode(true);
+                }}
+              >
                 Forgot password?
               </button>
             </div>
@@ -129,6 +193,8 @@ export default function SignIn({ onAuthenticated }) {
           <p className="auth-switch">
             Don't have an account? <Link to="/signup">Register</Link>
           </p>
+          </>
+          )}
         </div>
       </div>
     </div>
