@@ -18,7 +18,7 @@ From the project root open a terminal and run:
 
     $env:PYTHONPATH="$PWD\backend"
 
-    $env:JAVA_HOME="C:\Users\ivana\AppData\Local\Programs\EclipseAdopium\jdk-17-runtime"
+    $env:JAVA_HOME="C:\Users\ivana\AppData\Local\Programs\Eclipse Adoptium\jdk-17-runtime"
 
     $env:AUTH0_DOMAIN="dev-fg7mzenn1walaym8.us.auth0.com"
 
