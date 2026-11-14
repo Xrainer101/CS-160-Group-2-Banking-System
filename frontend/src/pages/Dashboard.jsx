@@ -24,7 +24,7 @@ export default function Dashboard({ user, accounts, transactions, payments }) {
         <StatCard
           label="Available savings"
           value={money(
-            accounts.find((a) => a.id === 'savings')?.available || 0,
+            accounts.find((a) => a.account_type === 'savings')?.available || 0,
           )}
           icon={PiggyBank}
           note="Your savings account"
@@ -33,7 +33,7 @@ export default function Dashboard({ user, accounts, transactions, payments }) {
           label="Recent spending"
           value={money(Math.abs(spent))}
           icon={ArrowUpRight}
-          note="Based on demo transactions"
+          note="Based on your recent transactions"
         />
       </div>
       <AccountsOverview accounts={accounts} />

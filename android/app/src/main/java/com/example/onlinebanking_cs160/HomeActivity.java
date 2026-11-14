@@ -109,49 +109,50 @@ public class HomeActivity extends AppCompatActivity {
     // ------------------------------------------------------------------
 
     private void loadUserAndAccounts() {
-        long userId = session.getUserId();
+        String token = session.getToken();
         executorService.execute(() -> {
-            User user = databaseManager.getUserById(userId);
-            List<Account> accounts = user == null ? null : databaseManager.getAccountsForUser(userId);
+            try {
+                ApiClient.AccountsResponse response = ApiClient.getAccounts(token);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
 
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed()) return;
-                if (user == null) {
-                    runOnUiThread(() -> {
-                        textWelcome.setText("Welcome back.");
-                        textAvatar.setText("U");
-                        showAccounts(java.util.Collections.emptyList());
-                    });
-                    return;
-                }
-                currentUser = user;
-                textWelcome.setText("Welcome back, " + user.getFirstName() + ".");
-                textAvatar.setText(initials(user));
-                showAccounts(accounts);
-            });
+                    String displayName = session.getDisplayName();
+                    if (displayName == null || displayName.trim().isEmpty()) displayName = "there";
+                    displayName = displayName.trim();
+                    textWelcome.setText("Welcome, " + displayName + "!");
+                    textAvatar.setText(displayName.substring(0, 1).toUpperCase());
+                    showAccounts(response.accounts);
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(
+                    this,
+                    "Could not load your banking accounts.",
+                    Toast.LENGTH_LONG
+                ).show());
+            }
         });
     }
 
-    private void showAccounts(List<Account> accounts) {
+    private void showAccounts(List<ApiClient.BankAccount> accounts) {
         accountsContainer.removeAllViews();
         textNoAccounts.setVisibility(accounts.isEmpty() ? View.VISIBLE : View.GONE);
 
         LayoutInflater inflater = LayoutInflater.from(this);
-        for (Account account : accounts) {
+        for (ApiClient.BankAccount account : accounts) {
             View card = inflater.inflate(R.layout.item_account, accountsContainer, false);
 
-            ((TextView) card.findViewById(R.id.textAccountType)).setText(account.getDisplayType());
-            ((TextView) card.findViewById(R.id.textAccountNumber)).setText(account.getMaskedNumber());
+            ((TextView) card.findViewById(R.id.textAccountType)).setText(account.type);
+            ((TextView) card.findViewById(R.id.textAccountNumber)).setText(account.number);
 
-            String balance = currency.format(account.getBalance());
+            String balance = currency.format(account.balance);
             ((TextView) card.findViewById(R.id.textBalance)).setText(balance);
             // No pending holds yet, so the available balance equals the current balance
-            ((TextView) card.findViewById(R.id.textAvailable)).setText(balance);
+            ((TextView) card.findViewById(R.id.textAvailable)).setText(currency.format(account.available));
 
             card.findViewById(R.id.buttonViewAccount).setOnClickListener(v ->
                     toast("Account details are coming soon"));
             card.findViewById(R.id.buttonAccountMenu).setOnClickListener(v ->
-                    toast(account.getDisplayType() + " account " + account.getMaskedNumber()));
+                    toast(account.type + " account " + account.number));
 
             accountsContainer.addView(card);
         }

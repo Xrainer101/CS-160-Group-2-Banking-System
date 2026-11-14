@@ -1,209 +1,200 @@
-
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import {
-  Landmark,
-  ShieldCheck,
-  Eye,
-  EyeOff,
-} from "lucide-react";
-
-export default function SignIn({ onSignIn }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [show, setShow] = useState(false);
-
-  // New states for backend authentication
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  async function submit(e) {
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Landmark, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { login, requestPasswordReset, verifyMfa } from '../auth/authService';
+export default function SignIn({ onAuthenticated }) {
+  const [username, setUsername] = useState(''),
+    [password, setPassword] = useState(''),
+    [resetEmail, setResetEmail] = useState(''),
+    [resetMode, setResetMode] = useState(false),
+    [resetMessage, setResetMessage] = useState(''),
+    [show, setShow] = useState(false),
+    [mfaToken, setMfaToken] = useState(''),
+    [mfaCode, setMfaCode] = useState(''),
+    [error, setError] = useState(''),
+    [loading, setLoading] = useState(false);
+  async function submitPasswordReset(e) {
     e.preventDefault();
-
-    // Clear previous errors
-    setError("");
-
-    // Validate input
-    if (!username.trim() || !password) {
-      setError("Please enter your username and password.");
-      return;
-    }
-
+    setError('');
+    setResetMessage('');
     setLoading(true);
-
     try {
-      // Calls the signIn function in App.jsx,
-      // which communicates with the backend.
-      await onSignIn(username.trim(), password);
-
-      // App.jsx handles navigation after successful login.
+      await requestPasswordReset(resetEmail);
+      setResetMessage('Check your inbox for password reset instructions.');
     } catch (err) {
-      console.error("Login failed:", err);
-
-      // Display the backend error to the user
-      setError(
-        err.message ||
-          "Unable to sign in. Please try again."
-      );
-
-      // Clear password after unsuccessful login
-      setPassword("");
+      setError(err.message || 'Unable to request a password reset.');
     } finally {
       setLoading(false);
     }
   }
-
+  async function submit(e) {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      if (mfaToken) {
+        const result = await verifyMfa(mfaToken, mfaCode);
+        await onAuthenticated(result);
+        return;
+      }
+      const result = await login(username, password);
+      if (result.requiresMfa) {
+        setMfaToken(result.mfaToken);
+      } else {
+        await onAuthenticated(result);
+      }
+    } catch (err) {
+      setError(err.message?.includes('Invalid otp_code')? 'Invalid or expired Duo code. Please try again.' : err.message || 'Unable to sign in.');
+    } finally {
+      setLoading(false);
+    }
+  }
   return (
     <div className="auth-page">
-      {/* Left side: Branding and promotional content */}
       <div className="auth-promo">
         <div className="auth-brand">
-          <Landmark />
-          Team 2 Bank
+          <Landmark /> Team 2 Bank
         </div>
-
         <div>
-          <span className="auth-overline">
-            BANKING, SIMPLIFIED
-          </span>
-
-          <h1>
-            Everything you need to manage your money.
-          </h1>
-
+          <span className="auth-overline">BANKING, SIMPLIFIED</span>
+          <h1>Everything you need to manage your money.</h1>
           <p>
-            One simple place for your accounts,
-            transfers, cards and spending activity.
+            One simple place for your accounts, transfers, cards and spending
+            activity.
           </p>
-
           <div className="auth-feature">
-            <ShieldCheck />
-            Built for an academic frontend demonstration
+            <ShieldCheck /> Built for an academic frontend demonstration
           </div>
         </div>
-
-        <small>
-          Illustrative data. Not a real financial
-          institution.
-        </small>
+        <small>Illustrative data. Not a real financial institution.</small>
       </div>
-
-      {/* Right side: Sign-in form */}
       <div className="auth-main">
         <div className="auth-card">
-          <span className="eyebrow">
-            WELCOME BACK
-          </span>
-
+          <span className="eyebrow">WELCOME BACK</span>
+          {resetMode && (
+            <form className="stacked-form" onSubmit={submitPasswordReset}>
+              <h2>Reset your password</h2>
+              <p>Enter your email and check your inbox for reset instructions.</p>
+              <label>
+                Email
+                <input
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  placeholder="Enter your email"
+                />
+              </label>
+              {resetMessage && <p role="status">{resetMessage}</p>}
+              {error && (
+                <p className="form-error" role="alert">
+                  {error}
+                </p>
+              )}
+              <button className="button button-primary full" disabled={loading}>
+                {loading ? 'Please wait...' : 'Submit'}
+              </button>
+              <button
+                type="button"
+                className="forgot-password"
+                onClick={() => {
+                  setError('');
+                  setResetMessage('');
+                  setResetMode(false);
+                }}
+              >
+                Back to sign in
+              </button>
+            </form>
+          )}
+          {!resetMode && (
+          <>
           <h2>Log in to your account</h2>
-
-          <p>
-            Check your balances, move money and pay bills.
-          </p>
-
-          <form
-            className="stacked-form"
-            onSubmit={submit}
-          >
-            {/* Username */}
+          <p>Check your balances, move money and pay bills.</p>
+          <form className="stacked-form" onSubmit={submit}>
             <label>
               Username
-
               <input
                 type="text"
                 required
                 autoComplete="username"
                 value={username}
-                onChange={(e) => {
-                  setUsername(e.target.value);
-                  setError("");
-                }}
+                onChange={(e) => setUsername(e.target.value)}
                 placeholder="Enter your username"
-                disabled={loading}
               />
             </label>
-
-            {/* Password */}
             <label>
               Password
-
               <div className="password-field">
                 <input
-                  type={show ? "text" : "password"}
+                  type={show ? 'text' : 'password'}
                   required
                   autoComplete="current-password"
                   value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setError("");
-                  }}
+                  onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
-                  disabled={loading}
                 />
-
                 <button
                   type="button"
                   onClick={() => setShow((v) => !v)}
-                  aria-label={
-                    show
-                      ? "Hide password"
-                      : "Show password"
-                  }
-                  disabled={loading}
+                  aria-label={show ? 'Hide password' : 'Show password'}
                 >
-                  {show ? (
-                    <EyeOff size={18} />
-                  ) : (
-                    <Eye size={18} />
-                  )}
+                  {show ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
             </label>
-
-            {/* Password recovery */}
             <div className="auth-options">
-              <Link
-                to="/forgot-password"
+              {/*
+              <label className="inline-check">
+                <input type="checkbox" /> Remember me
+              </label>
+              */}
+              <button
+                type="button"
                 className="forgot-password"
+                onClick={() => {
+                  setError('');
+                  setResetMessage('');
+                  setResetMode(true);
+                }}
               >
                 Forgot password?
-              </Link>
+              </button>
             </div>
-
-            {/* Authentication error */}
+            {mfaToken && (
+              <label>
+                Duo verification code
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  maxLength="6"
+                  required
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value)}
+                  placeholder="Enter your six-digit code"
+                />
+              </label>
+            )}
             {error && (
-              <p
-                className="form-error"
-                role="alert"
-              >
+              <p className="form-error" role="alert">
                 {error}
               </p>
             )}
-
-            {/* Submit */}
-            <button
-              type="submit"
-              className="button button-primary full"
-              disabled={loading}
-            >
+            <button className="button button-primary full" disabled={loading}>
               {loading
-                ? "Signing in..."
-                : "Sign in"}
+                ? 'Please wait...'
+                : mfaToken
+                  ? 'Verify code'
+                  : 'Sign in'}
             </button>
           </form>
-
-          {/* Registration link */}
           <p className="auth-switch">
-            Don't have an account?{" "}
-            <Link to="/signup">
-              Register
-            </Link>
+            Don't have an account? <Link to="/signup">Register</Link>
           </p>
-
-          <div className="auth-disclaimer">
-            Never enter a real banking password in this
-            prototype.
-          </div>
+          </>
+          )}
         </div>
       </div>
     </div>

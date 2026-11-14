@@ -103,6 +103,24 @@
   background: transparent;
   color: #8493a7;
 }
+.password-requirements {
+  display: grid;
+  gap: 7px;
+  margin-top: -8px;
+  color: #8b99ac;
+  font-size: 0.78rem;
+}
+.password-requirement {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.password-requirement input {
+  accent-color: #2557c8;
+}
+.password-requirement.met {
+  color: #247a55;
+}
 .auth-options {
   display: flex;
   justify-content: space-between;

@@ -1,418 +1,261 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import {
-  Landmark,
-  ShieldCheck,
-  Eye,
-  EyeOff,
-} from "lucide-react";
-
-import { registerUser } from "../api/authApi";
-
-export default function SignUp() {
-  const navigate = useNavigate();
-
-  // Registration form fields
-  const [name, setName] = useState("");
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [dateOfBirth, setDateOfBirth] = useState("");
-  const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-
-  // Password visibility
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-
-  // API request status
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  function validateForm() {
-    if (!name.trim()) {
-      return "Please enter your full name.";
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Landmark, ShieldCheck } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
+import {login, signup as createAuth0User,startMfaEnrollment, verifyMfaEnrollment} from '../auth/authService';
+export default function SignUp({ onAuthenticated }) {
+  const [name, setName] = useState(''),
+    [dateOfBirth, setDateOfBirth] = useState(''),
+    [email, setEmail] = useState(''),
+    [phone, setPhone] = useState(''),
+    [username, setUsername] = useState(''),
+    [password, setPassword] = useState(''),
+    [confirm, setConfirm] = useState(''),
+    [mfaToken, setMfaToken] = useState(''),
+    [mfaCode, setMfaCode] = useState(''),
+    [qrCode, setQrCode] = useState(''),
+    [error, setError] = useState(''),
+    [loading, setLoading] = useState(false);
+  const passwordRequirements = [
+    { label: 'At least 8 characters', met: password.length >= 8 },
+    { label: 'One uppercase letter', met: /[A-Z]/.test(password) },
+    { label: 'One lowercase letter', met: /[a-z]/.test(password) },
+    { label: 'One number', met: /\d/.test(password) },
+    { label: 'One special character', met: /[^A-Za-z0-9]/.test(password) },
+  ];
+  const passwordRequirementsMet = passwordRequirements.every(
+    (requirement) => requirement.met,
+  );
+  async function checkProfileAvailability() {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+    const response = await fetch(`${baseUrl}/api/auth/check-profile-availability`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        username,
+        phone_number: phone,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.detail || 'Unable to check profile availability.');
     }
-
-    if (!username.trim()) {
-      return "Please choose a username.";
-    }
-
-    if (
-      username.trim().length < 3 ||
-      username.trim().length > 30
-    ) {
-      return "Username must be between 3 and 30 characters.";
-    }
-
-    if (!/^[A-Za-z0-9_.]+$/.test(username.trim())) {
-      return "Username may only contain letters, numbers, underscores, and periods.";
-    }
-
-    if (!email.trim()) {
-      return "Please enter your email address.";
-    }
-
-    if (!dateOfBirth) {
-      return "Please enter your date of birth.";
-    }
-
-    const today = new Date();
-    const selectedDate = new Date(
-      `${dateOfBirth}T12:00:00`
-    );
-
-    if (
-      Number.isNaN(selectedDate.getTime()) ||
-      selectedDate > today
-    ) {
-      return "Please enter a valid date of birth.";
-    }
-
-    if (!phone.trim()) {
-      return "Please enter your phone number.";
-    }
-
-    const phoneDigits = phone.replace(/\D/g, "");
-    const normalizedPhone =
-      phoneDigits.length === 11 &&
-      phoneDigits.startsWith("1")
-        ? phoneDigits.slice(1)
-        : phoneDigits;
-
-    if (normalizedPhone.length !== 10) {
-      return "Please enter a valid 10-digit phone number.";
-    }
-
-    if (password.length < 8) {
-      return "Password must be at least 8 characters.";
-    }
-
-    if (password !== confirm) {
-      return "Passwords do not match.";
-    }
-
-    return "";
   }
-
   async function submit(e) {
     e.preventDefault();
-    setError("");
-
-    const validationError = validateForm();
-
-    if (validationError) {
-      setError(validationError);
+    setError('');
+    if (!passwordRequirementsMet) {
+      setError('Meet all password requirements before continuing.');
       return;
     }
-
+    if (password !== confirm) {
+      setError('Passwords do not match.');
+      return;
+    }
+    const nameParts = name.trim().split(/\s+/).filter(Boolean);
+    const validName =
+      nameParts.length >= 2 &&
+      nameParts.every((part) => /^[A-Za-zÀ-ÖØ-öø-ÿ'’-]+$/.test(part));
+    if (!validName) {
+      setError('Enter a valid first and last name.');
+      return;
+    }
     setLoading(true);
-
     try {
-      // Current FastAPI registration endpoint accepts:
-      // name, email, username, password.
-      //
-      // Date of birth and phone number are collected
-      // by the UI but are not currently sent because
-      // the backend schema does not yet support them.
+      // Check local banking-profile values before starting Auth0 and Duo enrollment.
+      await checkProfileAvailability();
 
-      await registerUser({
-        name: name.trim(),
-        email: email.trim().toLowerCase(),
-        username: username.trim().toLowerCase(),
+      if (mfaToken) {
+        const result = await verifyMfaEnrollment(mfaToken, mfaCode);
+        await onAuthenticated(result);
+        return;
+      }
+
+      await createAuth0User({
+        fullName: name,
+        dateOfBirth,
+        email,
+        phone,
+        username,
         password,
       });
 
-      // Registration succeeded.
-      // Navigate to sign-in instead of bypassing login.
-      navigate("/signin", {
-        replace: true,
-        state: {
-          registrationSuccess: true,
-        },
-      });
+      const result = await login(username, password);
+      if (result.requiresMfa) {
+        const enrollment = await startMfaEnrollment(result.mfaToken);
+        setMfaToken(result.mfaToken);
+        setQrCode(enrollment.barcode_uri);
+      } else {
+      await onAuthenticated(result);
+      }
     } catch (err) {
-      console.error("Registration failed:", err);
-
-      setError(
-        err.message ||
-          "Something went wrong while creating your account. Please try again."
-      );
+      if (
+        err.code === 'user_exists' ||
+        err.code === 'username_exists' ||
+        err.code === 'invalid_signup'
+      ) {
+        setError('An account with this email or username already exists.');
+      } else {
+        setError(err.message || 'Unable to create the account.');
+      }
     } finally {
       setLoading(false);
     }
   }
-
   return (
     <div className="auth-page">
-      {/* Left side: Branding */}
       <div className="auth-promo">
         <div className="auth-brand">
-          <Landmark />
-          Team 2 Bank
+          <Landmark /> Team 2 Bank
         </div>
-
         <div>
-          <span className="auth-overline">
-            GET STARTED
-          </span>
-
-          <h1>
-            A clearer way to see your financial picture.
-          </h1>
-
+          <span className="auth-overline">GET STARTED</span>
+          <h1>A clearer way to see your financial picture.</h1>
           <p>
-            Explore our banking platform to manage your
-            accounts, transfers, savings, and spending
-            activity in one convenient place.
+            Explore our banking prototype with sample accounts and simulated
+            transactions.
           </p>
-
           <div className="auth-feature">
-            <ShieldCheck />
-            Secure account registration
+            <ShieldCheck /> No real accounts are created
           </div>
         </div>
-
-        <small>
-          Academic banking application.
-          Not a real financial institution.
-        </small>
+        <small>Illustrative data. Not a real financial institution.</small>
       </div>
-
-      {/* Right side: Registration form */}
       <div className="auth-main">
         <div className="auth-card">
-          <span className="eyebrow">
-            GET STARTED
-          </span>
-
+          <span className="eyebrow">GET STARTED</span>
           <h2>Open an account</h2>
-
-          <p>
-            Fill in your details to create your
-            Team 2 Bank profile.
-          </p>
-
-          <form
-            className="stacked-form"
-            onSubmit={submit}
-          >
-            {/* Full name */}
+          <p>Fill in your details to set up online banking.</p>
+          <form className="stacked-form" onSubmit={submit}>
             <label>
               Full name
-
               <input
-                type="text"
                 required
-                autoComplete="name"
                 value={name}
-                onChange={(e) => {
-                  setName(e.target.value);
-                  setError("");
-                }}
-                placeholder="Your full name"
-                disabled={loading}
-              />
+                onChange={(e) => setName(e.target.value)}
+                placeholder="First name, Last name"></input>
             </label>
-
-            {/* Date of birth */}
             <label>
               Date of birth
-
               <input
-                type="date"
                 required
+                type="date"
                 value={dateOfBirth}
-                max={
-                  new Date().toLocaleDateString("en-CA")
-                }
-                onChange={(e) => {
-                  setDateOfBirth(e.target.value);
-                  setError("");
-                }}
-                disabled={loading}
+                onChange={(e) => setDateOfBirth(e.target.value)}
               />
             </label>
-
-            {/* Email address */}
             <label>
               Email address
-
               <input
-                type="email"
                 required
+                type="email"
                 autoComplete="email"
                 value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  setError("");
-                }}
+                onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@email.com"
-                disabled={loading}
               />
             </label>
-
-            {/* Phone number */}
             <label>
               Phone number
-
               <input
-                type="tel"
                 required
+                type="tel"
                 autoComplete="tel"
                 value={phone}
-                onChange={(e) => {
-                  setPhone(e.target.value);
-                  setError("");
-                }}
-                placeholder="(555) 123-4567"
-                disabled={loading}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="(555) 000-0000"
               />
             </label>
-
-            {/* Username */}
             <label>
               Username
-
               <input
-                type="text"
                 required
-                minLength={3}
-                maxLength={30}
+                type="text"
                 autoComplete="username"
                 value={username}
-                onChange={(e) => {
-                  setUsername(e.target.value);
-                  setError("");
-                }}
+                onChange={(e) => setUsername(e.target.value)}
                 placeholder="Choose a username"
-                disabled={loading}
               />
             </label>
-
-            {/* Password */}
             <label>
               Password
-
-              <div className="password-field">
-                <input
-                  type={
-                    showPassword
-                      ? "text"
-                      : "password"
-                  }
-                  required
-                  minLength={8}
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setError("");
-                  }}
-                  placeholder="At least 8 characters"
-                  disabled={loading}
-                />
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    setShowPassword((prev) => !prev)
-                  }
-                  aria-label={
-                    showPassword
-                      ? "Hide password"
-                      : "Show password"
-                  }
-                  disabled={loading}
-                >
-                  {showPassword ? (
-                    <EyeOff size={18} />
-                  ) : (
-                    <Eye size={18} />
-                  )}
-                </button>
-              </div>
+              <input
+                required
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="At least 8 characters"
+              />
             </label>
-
-            {/* Confirm password */}
+            <div className="password-requirements" aria-live="polite">
+              {passwordRequirements.map((requirement) => (
+                <label
+                  className={`password-requirement${requirement.met ? ' met' : ''}`}
+                  key={requirement.label}
+                >
+                  <input type="checkbox" checked={requirement.met} readOnly />
+                  {requirement.label}
+                </label>
+              ))}
+            </div>
             <label>
               Confirm password
-
-              <div className="password-field">
-                <input
-                  type={
-                    showConfirm
-                      ? "text"
-                      : "password"
-                  }
-                  required
-                  minLength={8}
-                  autoComplete="new-password"
-                  value={confirm}
-                  onChange={(e) => {
-                    setConfirm(e.target.value);
-                    setError("");
-                  }}
-                  placeholder="Re-enter your password"
-                  disabled={loading}
-                />
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    setShowConfirm((prev) => !prev)
-                  }
-                  aria-label={
-                    showConfirm
-                      ? "Hide password"
-                      : "Show password"
-                  }
-                  disabled={loading}
-                >
-                  {showConfirm ? (
-                    <EyeOff size={18} />
-                  ) : (
-                    <Eye size={18} />
-                  )}
-                </button>
-              </div>
+              <input
+                required
+                type="password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                placeholder="Re-enter your password"
+              />
             </label>
-
-            {/* Error message */}
+            {mfaToken && (
+              <>
+                {qrCode && (
+                  <div className="mfa-enrollment">
+                    <p>1. Download and open the Duo Mobile app.</p>
+                    <p>2. Tap Add + , and select "Use QR Code"</p>
+                    <p>3. Scan the QR code below. Name account.</p>
+                    <p>4. Enter the six-digit code from Duo mobile below.</p>
+                    <QRCodeCanvas value={qrCode} size={220} includeMargin />
+                  </div>
+                )}
+                <label>
+                  Duo verification code
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]{6}"
+                    maxLength="6"
+                    required
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value)}
+                    placeholder="Enter your six-digit code"
+                  />
+                </label>
+              </>
+            )}
             {error && (
-              <p
-                className="form-error"
-                role="alert"
-              >
+              <p className="form-error" role="alert">
                 {error}
               </p>
             )}
-
-            {/* Submit button */}
             <button
-              type="submit"
               className="button button-primary full"
-              disabled={loading}
+              disabled={loading || !passwordRequirementsMet}
             >
               {loading
-                ? "Creating account..."
-                : "Create account"}
+                ? 'Please wait...'
+                : mfaToken
+                  ? 'Complete enrollment'
+                  : 'Create account'}
             </button>
           </form>
-
-          {/* Sign in link */}
           <p className="auth-switch">
-            Already have an account?{" "}
-            <Link to="/signin">
-              Sign in
-            </Link>
+            Already have an account? <Link to="/signin">Sign in</Link>
           </p>
-
           <div className="auth-disclaimer">
-            This is an academic banking prototype.
-            Do not use real banking credentials.
-            Date of birth and phone number are not
-            currently saved by the backend.
+            Never enter a real banking password in this prototype.
           </div>
         </div>
       </div>
