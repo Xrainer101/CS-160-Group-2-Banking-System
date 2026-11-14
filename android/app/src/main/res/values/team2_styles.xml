@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared styles so every label and text field looks the same -->
+<resources>
+    <style name="FieldLabel">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginBottom">6dp</item>
+        <item name="android:textColor">@color/text_dark</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="FieldInput">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginBottom">16dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">14dp</item>
+        <item name="android:background">@drawable/bg_input</item>
+        <item name="android:textColor">@color/text_dark</item>
+        <item name="android:textColorHint">@color/text_muted</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <!-- Homepage: small blue all-caps label above a heading, like .section-label -->
+    <style name="SectionLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginBottom">6dp</item>
+        <item name="android:letterSpacing">0.12</item>
+        <item name="android:textColor">@color/label_blue</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- Homepage: section heading, like .section-header h2 -->
+    <style name="SectionTitle">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/text_dark</item>
+        <item name="android:textSize">21sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- Homepage: small blue text button ("View all", "Manage"), like .text-btn -->
+    <style name="TextLinkButton">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">8dp</item>
+        <item name="android:paddingEnd">8dp</item>
+        <item name="android:background">?attr/selectableItemBackground</item>
+        <item name="android:textColor">@color/link_blue</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- Homepage: gray message shown when a list has nothing in it yet -->
+    <style name="EmptyStateText">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingTop">20dp</item>
+        <item name="android:paddingBottom">20dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textColor">@color/text_gray</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+</resources>

@@ -1,0 +1,363 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home screen (after login), based on the team's homepage design.
+     Phone layout follows the design's small-screen rules: everything in one column,
+     nav links hidden, only the avatar shown in the top bar. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/white"
+    android:orientation="vertical">
+
+    <!-- ========== TOP BAR (stays put while the page scrolls, like the sticky navbar) ========== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="68dp"
+        android:background="@drawable/bg_navbar"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp">
+
+        <TextView
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:background="@drawable/bg_brand"
+            android:gravity="center"
+            android:text="T2"
+            android:textColor="@color/white"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="11dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Team 2 Bank"
+                android:textColor="@color/text_dark"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Online Banking"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/buttonNotifications"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_icon_button"
+            android:contentDescription="Notifications"
+            android:padding="9dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_notifications"
+            app:tint="@color/text_dark" />
+
+        <!-- User's initials. Tap for the account menu (Log out). -->
+        <TextView
+            android:id="@+id/textAvatar"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="12dp"
+            android:background="@drawable/bg_avatar"
+            android:clickable="true"
+            android:contentDescription="Account menu"
+            android:focusable="true"
+            android:gravity="center"
+            android:textColor="@color/navy"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <ScrollView
+        android:id="@+id/scrollHome"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/page_bg"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- ========== WELCOME ========== -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_welcome"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingTop="32dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="28dp">
+
+                <TextView
+                    style="@style/SectionLabel"
+                    android:text="OVERVIEW" />
+
+                <TextView
+                    android:id="@+id/textWelcome"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Welcome back."
+                    android:textColor="@color/text_dark"
+                    android:textSize="28sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Here's a quick look at your accounts and recent banking activity."
+                    android:textColor="@color/text_gray"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="Last login"
+                    android:textColor="@color/text_label"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/textLastLogin"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="@color/text_dark"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Page content, with side margins -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp">
+
+                <!-- ========== ACCOUNTS ========== -->
+                <TextView
+                    style="@style/SectionLabel"
+                    android:layout_marginTop="8dp"
+                    android:text="YOUR ACCOUNTS" />
+
+                <TextView
+                    style="@style/SectionTitle"
+                    android:text="Accounts" />
+
+                <Button
+                    android:id="@+id/buttonOpenAccount"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="13dp"
+                    android:text="Open New Account"
+                    android:textAllCaps="false"
+                    android:textColor="@color/navy"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    app:backgroundTint="@color/white"
+                    app:cornerRadius="9dp"
+                    app:rippleColor="@color/avatar_bg"
+                    app:strokeColor="@color/input_border"
+                    app:strokeWidth="1dp" />
+
+                <!-- Account cards are added here by HomeActivity (one item_account per account) -->
+                <LinearLayout
+                    android:id="@+id/accountsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:orientation="vertical" />
+
+                <TextView
+                    android:id="@+id/textNoAccounts"
+                    style="@style/EmptyStateText"
+                    android:background="@drawable/bg_card"
+                    android:text="You don't have any open accounts yet.\nTap Open New Account to get started."
+                    android:visibility="gone" />
+
+                <!-- ========== QUICK ACTIONS ========== -->
+                <TextView
+                    style="@style/SectionLabel"
+                    android:layout_marginTop="26dp"
+                    android:text="QUICK ACCESS" />
+
+                <TextView
+                    style="@style/SectionTitle"
+                    android:text="What would you like to do?" />
+
+                <!-- Filled in by HomeActivity (one item_quick_action per action) -->
+                <LinearLayout
+                    android:id="@+id/quickActionsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:orientation="vertical" />
+
+                <!-- ========== RECENT TRANSACTIONS ========== -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="28dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                style="@style/SectionLabel"
+                                android:text="ACTIVITY" />
+
+                            <TextView
+                                style="@style/SectionTitle"
+                                android:text="Recent Transactions" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/buttonViewAllTransactions"
+                            style="@style/TextLinkButton"
+                            android:text="View all" />
+                    </LinearLayout>
+
+                    <!-- Transaction rows will go here once there is a transactions table -->
+                    <LinearLayout
+                        android:id="@+id/transactionsContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+
+                    <TextView
+                        android:id="@+id/textNoTransactions"
+                        style="@style/EmptyStateText"
+                        android:text="No transactions yet.\nDeposits, payments and transfers will show up here." />
+                </LinearLayout>
+
+                <!-- ========== UPCOMING PAYMENTS ========== -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:layout_marginBottom="40dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                style="@style/SectionLabel"
+                                android:text="BILL PAY" />
+
+                            <TextView
+                                style="@style/SectionTitle"
+                                android:text="Upcoming Payments" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/buttonManagePayments"
+                            style="@style/TextLinkButton"
+                            android:text="Manage" />
+                    </LinearLayout>
+
+                    <!-- Payment rows will go here once there is a bill-pay table -->
+                    <LinearLayout
+                        android:id="@+id/paymentsContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+
+                    <TextView
+                        android:id="@+id/textNoPayments"
+                        style="@style/EmptyStateText"
+                        android:text="No scheduled payments.\nBills you schedule will show up here." />
+
+                    <Button
+                        android:id="@+id/buttonSchedulePayment"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="4dp"
+                        android:text="Schedule a Payment"
+                        android:textAllCaps="false"
+                        android:textColor="@color/white"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        app:backgroundTint="@color/navy"
+                        app:cornerRadius="9dp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- ========== FOOTER ========== -->
+            <LinearLayout
+                android:id="@+id/footer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/footer_bg"
+                android:gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingTop="22dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="22dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="┬⌐ 2026 Team 2 Online Banking Project"
+                    android:textColor="@color/footer_text"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="13dp"
+                    android:text="Security     Privacy     Help     Contact"
+                    android:textColor="@color/footer_text"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="13dp"
+                    android:text="CS 160 Academic Prototype"
+                    android:textColor="@color/footer_text"
+                    android:textSize="11sp" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

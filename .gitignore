@@ -1,7 +1,8 @@
-# --- VS Code ---
-.vscode/*
-!.vscode/extensions.json
-.history/
+# --- VS Code & Java Build Outputs ---
+.vscode/
+bin/
+target/
+*.class
 
 # --- SQLite Databases ---
 *.db

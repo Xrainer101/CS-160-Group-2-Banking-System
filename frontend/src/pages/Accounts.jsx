@@ -1,4 +1,32 @@
 import AccountsOverview from '../components/AccountsOverview';
 import { TransactionRows } from '../components/RecentTransactions';
 import { money } from '../data/mockData';
-export default function Accounts({ accounts, transactions }) { return <><div className="page-heading"><span className="eyebrow">YOUR FINANCES</span><h1>My accounts</h1><p>Explore your balances and account activity.</p></div><AccountsOverview accounts={accounts}/><section className="panel"><h2>Account summary</h2><div className="summary-list">{accounts.map(a=><div key={a.id} className="summary-row"><span>{a.type} <small>{a.number}</small></span><strong>{money(a.balance)}</strong></div>)}</div></section><section className="panel"><h2>Latest activity</h2><TransactionRows transactions={transactions.slice(0,5)}/></section></>; }
+export default function Accounts({ accounts, transactions }) {
+  return (
+    <>
+      <div className="page-heading">
+        <span className="eyebrow">YOUR FINANCES</span>
+        <h1>My accounts</h1>
+        <p>Explore your balances and account activity.</p>
+      </div>
+      <AccountsOverview accounts={accounts} />
+      <section className="panel">
+        <h2>Account summary</h2>
+        <div className="summary-list">
+          {accounts.map((a) => (
+            <div key={a.id} className="summary-row">
+              <span>
+                {a.type} <small>{a.number}</small>
+              </span>
+              <strong>{money(a.balance)}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="panel">
+        <h2>Latest activity</h2>
+        <TransactionRows transactions={transactions.slice(0, 5)} />
+      </section>
+    </>
+  );
+}
