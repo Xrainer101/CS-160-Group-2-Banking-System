@@ -1,0 +1,268 @@
+
+.admin-portal {
+  width: 100%;
+}
+
+.admin-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px 20px;
+  margin: 20px 0 25px;
+  border: 1px solid #dce5f4;
+  border-radius: 13px;
+  background: #f2f6fe;
+  color: #365781;
+}
+
+.admin-banner strong {
+  display: block;
+  font-size: 0.9rem;
+  margin-bottom: 5px;
+}
+
+.admin-banner p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.admin-tabs {
+  display: flex;
+  gap: 12px;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+
+.admin-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 18px;
+  border: 1px solid #e0e7f0;
+  border-radius: 10px;
+  background: #fff;
+  color: #64748b;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-tabs button.active {
+  background: #2353c9;
+  border-color: #2353c9;
+  color: white;
+}
+
+.admin-heading-row,
+.admin-actions,
+.admin-report-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+}
+
+.admin-heading-row {
+  margin-bottom: 18px;
+}
+
+.admin-heading-row h2 {
+  margin: 0;
+}
+
+.admin-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #dce4ef;
+  border-radius: 12px;
+  margin-bottom: 22px;
+}
+
+.admin-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  font: inherit;
+}
+
+.admin-search .button {
+  flex-shrink: 0;
+}
+
+.admin-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.admin-table th {
+  background: #f5f7fb;
+  color: #667891;
+  font-size: 0.75rem;
+  padding: 15px;
+  white-space: nowrap;
+}
+
+.admin-table td {
+  padding: 17px 15px;
+  font-size: 0.83rem;
+  border-bottom: 1px solid #edf1f6;
+}
+
+.admin-table td small {
+  display: block;
+  color: #91a0b2;
+  margin-top: 5px;
+}
+
+.admin-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.admin-danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid #f0c6ca;
+  background: #fff5f5;
+  color: #bb3146;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.admin-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.admin-stats .panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-stats svg {
+  color: #3464c9;
+}
+
+.admin-stats small {
+  color: #8796aa;
+}
+
+.admin-stats h2 {
+  font-size: 1.9rem;
+  margin: 0;
+}
+
+.admin-report-option {
+  padding: 22px 0;
+  border-bottom: 1px solid #edf1f6;
+}
+
+.admin-report-option p {
+  color: #8694a7;
+  font-size: 0.82rem;
+  margin-top: 8px;
+}
+
+.admin-report-option .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.admin-error,
+.admin-success {
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 20px;
+  font-size: 0.85rem;
+}
+
+.admin-error {
+  background: #fff1f2;
+  color: #a72f42;
+}
+
+.admin-success {
+  background: #edf8f2;
+  color: #28734b;
+}
+
+.admin-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #102342a6;
+  display: grid;
+  place-items: center;
+  z-index: 200;
+  padding: 20px;
+}
+
+.admin-modal {
+  background: #fff;
+  width: min(440px, 100%);
+  padding: 28px;
+  border-radius: 18px;
+  box-shadow: 0 24px 70px #10234230;
+}
+
+.admin-modal > svg {
+  color: #bf3549;
+}
+
+.admin-modal h2 {
+  margin: 12px 0;
+}
+
+.admin-modal p {
+  font-size: 0.88rem;
+  color: #6c7b91;
+  line-height: 1.6;
+}
+
+.admin-modal input {
+  width: 100%;
+  padding: 13px;
+  border: 1px solid #dce4ef;
+  border-radius: 9px;
+  margin: 12px 0 20px;
+}
+
+@media (max-width: 800px) {
+  .admin-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-search,
+  .admin-report-option {
+    flex-wrap: wrap;
+  }
+
+  .admin-table {
+    min-width: 630px;
+  }
+}
