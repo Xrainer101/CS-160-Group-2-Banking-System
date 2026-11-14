@@ -186,89 +186,110 @@ def register(
         "username": username
     }
 
+
 # Login
 @app.post("/api/auth/login")
 def login(
-    request: LoginRequest
+    request: LoginRequest,
+    database: sqlite3.Connection = Depends(get_database)
 ):
-    print("hi")
-    username = request.username.lower()
-    # Find user in the database by username
-    database_manager = jpype.JClass("database.DatabaseManager")
+    username = request.username.strip().lower()
 
-    user = database_manager.getUserByUsername(username) # this doesn't work
-    # If no user then 401 error
+    # Use the SAME SQLite database as registration.
+    user = database.execute(
+        "SELECT * FROM users WHERE username = ?",
+        (username,)
+    ).fetchone()
+
+    # Reject unknown users.
     if user is None:
         raise HTTPException(
             status_code=401,
             detail="Invalid username or password"
         )
-    
-    
-    # Account lock check: If the user has failed too many login attempts, lock the account for a period of time
-    if user["lockout_until"]:
-        lock_until = datetime.fromisoformat(user["lockout_until"])
 
-        if lock_until > datetime.now(timezone.utc):
+    now = datetime.now(timezone.utc)
+
+    # Check whether account is temporarily locked.
+    if user["lock_until"]:
+        lock_until = datetime.fromisoformat(
+            user["lock_until"]
+        )
+
+        if lock_until > now:
             raise HTTPException(
                 status_code=423,
                 detail="Account is temporarily locked"
             )
 
-    # Password verification by checking password hash
+    # Verify the bcrypt password hash.
     password_is_correct = check_password(
         request.password,
         user["password_hash"]
     )
 
-    # If password wrong increment the failed attempts
     if not password_is_correct:
-        # failed_attempts = user["failed_attempts"] + 1
-        # # Lock the account if the failed attempts exceed the limit
-        # if failed_attempts >= LOCKOUT_LIMIT:
-        #     lock_until = datetime.now(timezone.utc) + timedelta( # lockout time
-        #         minutes=LOCKOUT_MINUTES
-        #     )
-        #     database.execute(
-        #         """
-        #         UPDATE users
-        #         SET failed_attempts = 0, lock_until = ?
-        #         WHERE user_id = ?
-        #         """,
-        #         (lock_until.isoformat(), user["user_id"])
-        #     )
-        #     database.commit()
+        failed_attempts = user["failed_attempts"] + 1
 
-        #     raise HTTPException(
-        #         status_code=423,
-        #         detail="Account is temporarily locked"
-        #     )
-        # # Failed password but not locked yet, update the failed attempts in the database
-        # database.execute(
-        #     """
-        #     UPDATE users
-        #     SET failed_attempts = ?
-        #     WHERE user_id = ?
-        #     """,
-        #     (failed_attempts, user["user_id"])
-        # )
-        # database.commit()
+        if failed_attempts >= LOCKOUT_LIMIT:
+            lock_until = now + timedelta(
+                minutes=LOCKOUT_MINUTES
+            )
+
+            database.execute(
+                """
+                UPDATE users
+                SET failed_attempts = 0,
+                    lock_until = ?
+                WHERE user_id = ?
+                """,
+                (
+                    lock_until.isoformat(),
+                    user["user_id"]
+                )
+            )
+
+            database.commit()
+
+            raise HTTPException(
+                status_code=423,
+                detail="Account is temporarily locked"
+            )
+
+        database.execute(
+            """
+            UPDATE users
+            SET failed_attempts = ?,
+                lock_until = NULL
+            WHERE user_id = ?
+            """,
+            (
+                failed_attempts,
+                user["user_id"]
+            )
+        )
+
+        database.commit()
 
         raise HTTPException(
             status_code=401,
             detail="Invalid username or password"
         )
-    # Successful login, resets failure count and lockout status, and returns a JWT token
-    # database.execute(
-    #     """
-    #     UPDATE users
-    #     SET failed_attempts = 0, lock_until = NULL
-    #     WHERE user_id = ?
-    #     """,
-    #     (user["user_id"],)
-    # )
-    # database.commit()
 
+    # Successful login: clear failures and lockout.
+    database.execute(
+        """
+        UPDATE users
+        SET failed_attempts = 0,
+            lock_until = NULL
+        WHERE user_id = ?
+        """,
+        (user["user_id"],)
+    )
+
+    database.commit()
+
+    # Return token for subsequent authenticated requests.
     return {
         "access_token": create_token(user["user_id"]),
         "token_type": "bearer"
