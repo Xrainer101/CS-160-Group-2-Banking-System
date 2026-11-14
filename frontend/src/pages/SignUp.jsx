@@ -26,6 +26,22 @@ export default function SignUp({ onAuthenticated }) {
   const passwordRequirementsMet = passwordRequirements.every(
     (requirement) => requirement.met,
   );
+  async function checkProfileAvailability() {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+    const response = await fetch(`${baseUrl}/api/auth/check-profile-availability`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        username,
+        phone_number: phone,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.detail || 'Unable to check profile availability.');
+    }
+  }
   async function submit(e) {
     e.preventDefault();
     setError('');
@@ -47,9 +63,12 @@ export default function SignUp({ onAuthenticated }) {
     }
     setLoading(true);
     try {
+      // Check local banking-profile values before starting Auth0 and Duo enrollment.
+      await checkProfileAvailability();
+
       if (mfaToken) {
         const result = await verifyMfaEnrollment(mfaToken, mfaCode);
-        onAuthenticated(result);
+        await onAuthenticated(result);
         return;
       }
 
@@ -68,7 +87,7 @@ export default function SignUp({ onAuthenticated }) {
         setMfaToken(result.mfaToken);
         setQrCode(enrollment.barcode_uri);
       } else {
-        onAuthenticated(result);
+      await onAuthenticated(result);
       }
     } catch (err) {
       if (

@@ -158,6 +158,10 @@ def test_new_auth0_user_is_provisioned(monkeypatch):
             return "Aguilar"
         def getEmail(self):
             return "ivana@example.com"
+        def getPhoneNumber(self):
+            return "123-4567"
+        def getDateOfBirth(self):
+            return "2003-07-22"
     class FakeUserDAO:
         @staticmethod
         def getUserByAuth0Sub(auth0_sub):
@@ -166,9 +170,14 @@ def test_new_auth0_user_is_provisioned(monkeypatch):
         def linkAuth0SubByEmail(auth0_sub, email):
             return None
         @staticmethod
-        def registerAuth0User(auth0_sub, username, first_name, last_name, email, phone_number):
+        def findAuth0ProfileConflict(username, email, phone_number):
+            return None
+        @staticmethod
+        def registerAuth0User(auth0_sub, username, first_name, last_name, email, phone_number, date_of_birth):
             assert auth0_sub == "auth0|test-user"
             assert email == "ivana@example.com"
+            assert phone_number == "123-4567"
+            assert date_of_birth == "2003-07-22"
             return FakeUser()
     account_calls = []
 
@@ -185,11 +194,77 @@ def test_new_auth0_user_is_provisioned(monkeypatch):
             "given_name": "Ivana",
             "family_name": "Aguilar",
             "email": "ivana@example.com",
+            # Copies the custom data submitted during Auth0 registration
+            "user_metadata": {
+                "username": "ivana_auth0test",
+                "phone_number": "123-4567",
+                "date_of_birth": "2003-07-22",
+            },
         }
     )
     assert account_calls == [42]
     assert result["user_id"] == 42
     assert result["email"] == "ivana@example.com"
+
+
+def test_new_auth0_user_with_duplicate_phone_is_rejected(monkeypatch):
+    import main
+    from fastapi import HTTPException
+
+    class FakeUserDAO:
+        @staticmethod
+        def getUserByAuth0Sub(auth0_sub):
+            return None
+        @staticmethod
+        def linkAuth0SubByEmail(auth0_sub, email):
+            return None
+        @staticmethod
+        def findAuth0ProfileConflict(username, email, phone_number):
+            assert phone_number == "123-4567"
+            return "phone_number"
+
+    monkeypatch.setattr(main.jpype, "JClass", lambda name: FakeUserDAO)
+
+    # The backend should reject the new profile before creating accounts
+    with pytest.raises(HTTPException) as error:
+        main.link_auth0_user({
+            "sub": "auth0|duplicate-phone",
+            "name": "Duplicate Phone",
+            "email": "different@example.com",
+            "user_metadata": {
+                "username": "different-user",
+                "phone_number": "123-4567",
+            },
+        })
+    # HTTP 409 means the submitted profile data conflicts with an existing user
+    assert error.value.status_code == 409
+    assert error.value.detail == "Phone number is already in use"
+
+
+def test_new_auth0_user_without_phone_is_rejected(monkeypatch):
+    import main
+    from fastapi import HTTPException
+
+    class FakeUserDAO:
+        @staticmethod
+        def getUserByAuth0Sub(auth0_sub):
+            return None
+        @staticmethod
+        def linkAuth0SubByEmail(auth0_sub, email):
+            return None
+
+    monkeypatch.setattr(main.jpype, "JClass", lambda name: FakeUserDAO)
+
+    # No phone metadata means the backend cannot safely create the profile
+    with pytest.raises(HTTPException) as error:
+        main.link_auth0_user({
+            "sub": "auth0|missing-phone",
+            "name": "Missing Phone",
+            "email": "missing-phone@example.com",
+        })
+    # HTTP 400 means the Auth0 profile data is incomplete for registration
+    assert error.value.status_code == 400
+    assert "missing a phone number" in error.value.detail
 
 
 ### Test 7: Existing Auth0 users are reused and not re-registered
@@ -206,6 +281,10 @@ def test_existing_auth0_user_is_reused(monkeypatch):
             return "Aguilar"
         def getEmail(self):
             return "ivana@example.com"
+        def getPhoneNumber(self):
+            return "123-4567"
+        def getDateOfBirth(self):
+            return "2003-07-22"
     class FakeUserDAO:
         @staticmethod
         def getUserByAuth0Sub(auth0_sub):

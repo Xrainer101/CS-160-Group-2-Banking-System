@@ -145,6 +145,8 @@ public class RegisterActivity extends AppCompatActivity {
         buttonRegister.setEnabled(false);
         executorService.execute(() -> {
             try {
+                // Check the banking database before creating the Auth0 account or starting Duo enrollment
+                ApiClient.checkProfileAvailability(email, username, phoneNumber);
                 ApiClient.register(email, username, password);
             
                 runOnUiThread(() -> {
@@ -157,7 +159,16 @@ public class RegisterActivity extends AppCompatActivity {
                     buttonRegister.setEnabled(true);
                     String message = e.getMessage();
                     
-                    if(message != null && message.contains("USERNAME_TAKEN")) {
+                    if(message != null && message.contains("Username is already in use")) {
+                        editUsername.setError("That username is already in use");
+                        editUsername.requestFocus();
+                    } else if (message != null && message.contains("Email is already in use")) {
+                        editEmail.setError("That email is already in use");
+                        editEmail.requestFocus();
+                    } else if (message != null && message.contains("Phone number is already in use")) {
+                        editPhone.setError("That phone number is already in use");
+                        editPhone.requestFocus();
+                    } else if(message != null && message.contains("USERNAME_TAKEN")) {
                         editUsername.setError("That username is already taken");
                         editUsername.requestFocus();
                     } else if (message != null && message.contains("EMAIL_TAKEN")) {

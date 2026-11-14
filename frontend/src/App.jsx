@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useNavigate} from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
@@ -49,6 +49,7 @@ function AppContent() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [bankingLoading, setBankingLoading] = useState(false);
   const [bankingError, setBankingError] = useState('');
+  const skipNextSessionLoadRef = useRef(false);
 
   // Load the user's banking data when they log in
   useEffect(() => {
@@ -62,6 +63,11 @@ function AppContent() {
         cancelled = true;
       };
     }
+    if (skipNextSessionLoadRef.current) {
+      skipNextSessionLoadRef.current = false;
+      return;
+    }
+
     // Get user's profile and account information from the API
     async function loadBankingData() {
       setBankingLoading(true);
@@ -70,9 +76,11 @@ function AppContent() {
         const profile = await getCurrentUser();
         const accountData = await getAccounts();
         if (cancelled) return;
+        const bankingProfile = profile.banking_user || profile;
         setUser({
-          name: profile.name || 'Banking user',
-          email: profile.email || '',
+          name: bankingProfile.full_name || bankingProfile.name || 'Banking user',
+          email: bankingProfile.email || '',
+          isNewUser: bankingProfile.is_new_user === true,
         });
         setAccounts(accountData.accounts || []);
         setTransactions(accountData.transactions || []);
@@ -95,12 +103,38 @@ function AppContent() {
     setNotice(message);
     window.setTimeout(() => setNotice(''), 4500);
   }
-  function handleAuthenticated(result) {
+  async function handleAuthenticated(result) {
     if (!result?.session) return;
+
     saveSession(result.session);
-    setSession(result.session);
-    setUser(userFromSession(result.session));
-    navigate('/dashboard');
+    setBankingError('');
+    setBankingLoading(true);
+
+    try {
+      const profile = await getCurrentUser();
+      const accountData = await getAccounts();
+      const bankingProfile = profile.banking_user || profile;
+
+      setUser({
+        name: bankingProfile.full_name || bankingProfile.name || 'Banking user',
+        email: bankingProfile.email || '',
+        isNewUser: bankingProfile.is_new_user === true,
+      });
+      setAccounts(accountData.accounts || []);
+      setTransactions(accountData.transactions || []);
+      skipNextSessionLoadRef.current = true;
+      setSession(result.session);
+      navigate('/dashboard');
+    } catch (error) {
+      clearSession();
+      setSession(null);
+      setUser(null);
+      setAccounts([]);
+      setTransactions([]);
+      throw error;
+    } finally {
+      setBankingLoading(false);
+    }
   }
   function signOut() {
     clearSession();

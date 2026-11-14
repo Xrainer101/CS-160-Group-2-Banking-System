@@ -36,5 +36,6 @@ http://127.0.0.1:8000
 - `400 Bad Request` — The request data is invalid or incomplete
 - `401 Unauthorized` — The auth0 token is missing, invalid, expired, or has the wrong audience
 - `404 Not Found` — The requested endpoint or resource does not exist
+- `409 Conflict` - The username, email, or phone number is already in use
 - `500 Internal Server Error` — An unexpected backend or database error occurred
 - `502 Bad Gateway` — The backend could not retrieve required information from Auth0

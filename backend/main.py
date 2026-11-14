@@ -50,6 +50,11 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+# Information needed to check whether an email, username, or phone number is already in use
+class ProfileAvailabilityRequest(BaseModel):
+    email: EmailStr
+    username: str = Field(min_length=3, max_length=30)
+    phone_number: str = Field(min_length=1, max_length=30)
 
 # Database functions
 def get_database():
@@ -149,6 +154,7 @@ def link_auth0_user(token_data):
     """Resolve Auth0 subject to a Java banking user and creating one if needed."""
     user_dao = jpype.JClass("database.UserDAO")
     auth0_sub = token_data["sub"]
+    is_new_user = False       # Stays true only when this login creates the user's local banking profile
     banking_user = user_dao.getUserByAuth0Sub(auth0_sub)
     if banking_user is None and token_data.get("email"):
         banking_user = user_dao.linkAuth0SubByEmail(
@@ -163,14 +169,50 @@ def link_auth0_user(token_data):
                 status_code=400,
                 detail="Auth0 token is missing email needed to create a banking profile"
             )
-        full_name = str(token_data.get("name") or "").strip()
+        # Get the user's registration information from the Auth0 token.
+        metadata = token_data.get("user_metadata") or {}
+        # Prefer the full name collected during registration over Auth0's display name
+        full_name = str(
+            token_data.get("full_name")
+            or metadata.get("full_name")
+            or token_data.get("name")
+            or ""
+        ).strip()
         name_parts = full_name.split(maxsplit=1)
-        first_name = str(token_data.get("given_name") or (name_parts[0] if name_parts else "Auth0"))
-        last_name = str(token_data.get("family_name") or (name_parts[1] if len(name_parts) > 1 else "User"))
+        # Use Auth0's first/last name fields, or split the full name if needed.
+        first_name = str(token_data.get("given_name") or metadata.get("first_name") or (name_parts[0] if name_parts else "Auth0"))
+        last_name = str(token_data.get("family_name") or metadata.get("last_name") or (name_parts[1] if len(name_parts) > 1 else "User"))
         email_name = str(email).split("@", 1)[0]
         subject_name = auth0_sub.split("|", 1)[-1][:8]
-        username = f"{email_name}_{subject_name}"[:30]
-        phone_number = f"auth0:{auth0_sub}"
+        username = str(token_data.get("username") or metadata.get("username") or f"{email_name}_{subject_name}")[:30]
+        # Check both the token and Auth0 metadata for the phone number.
+        phone_value = token_data.get("phone_number") or metadata.get("phone_number")
+        # A phone number is required before we can create the banking profile.
+        if not phone_value:
+            raise HTTPException(
+                status_code=400,
+                detail="Auth0 profile is missing a phone number needed to create a banking profile"
+            )
+        phone_number = str(phone_value).strip()  # Convert it to text and remove extra spaces.
+        date_of_birth = token_data.get("date_of_birth") or metadata.get("date_of_birth")
+
+        # Check whether another banking profile already uses these values.
+        conflict = user_dao.findAuth0ProfileConflict(username,email,phone_number)
+        if conflict == "database":
+            raise HTTPException(
+                status_code=500,
+                detail="Unable to check for duplicate banking profile data"
+            )
+        if conflict:
+            labels = {
+                "username": "Username",
+                "email": "Email",
+                "phone_number": "Phone number",
+            }
+            raise HTTPException(
+                status_code=409,
+                detail=f"{labels[conflict]} is already in use"
+            )
 
         banking_user = user_dao.registerAuth0User(
             auth0_sub,
@@ -179,20 +221,31 @@ def link_auth0_user(token_data):
             last_name,
             email,
             phone_number,
+            date_of_birth,
         )
         if banking_user is None:
             raise HTTPException(
                 status_code=500,
                 detail="Unable to create a banking profile for this Auth0 account"
             )
+        is_new_user = True
         from java_database import create_default_accounts
         create_default_accounts(int(banking_user.getUserId()))
+
+    metadata = token_data.get("user_metadata") or {}
+    auth0_full_name = str(token_data.get("full_name") or metadata.get("full_name") or "").strip()
+    banking_name = f"{banking_user.getFirstName()} {banking_user.getLastName()}".strip()
+    display_name = auth0_full_name or banking_name
 
     return {
         "user_id": int(banking_user.getUserId()),
         "username": str(banking_user.getUsername()),
-        "name": f"{banking_user.getFirstName()} {banking_user.getLastName()}",
-        "email": str(banking_user.getEmail())
+        "name": display_name,
+        "full_name": display_name,
+        "email": str(banking_user.getEmail()),
+        "phone_number": str(banking_user.getPhoneNumber()),
+        "date_of_birth": banking_user.getDateOfBirth(),
+        "is_new_user": is_new_user,
     }
 
 # Check Auth0 token
@@ -227,7 +280,16 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             detail="Auth0 token is missing a user identity"
         )
 
-    if not token_data.get("email"):
+    # Auth0 adds a prefix to custom claims
+    # Copy those values to the simple field names that the rest of this backend already expects
+    claim_namespace = "https://team2bank-api"
+    for field in ("full_name", "date_of_birth", "phone_number", "username"):
+        namespaced_field = f"{claim_namespace}/{field}"
+        if not token_data.get(field) and token_data.get(namespaced_field):
+            token_data[field] = token_data[namespaced_field]
+
+    profile_fields = ("email", "name", "given_name", "family_name", "username", "phone_number", "date_of_birth", "user_metadata")
+    if any(not token_data.get(field) for field in profile_fields):
         userinfo = get_auth0_userinfo(credentials.credentials)
         if userinfo.get("sub") != token_data["sub"]:
             raise HTTPException(
@@ -245,6 +307,33 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 @app.get("/api/data")
 def read_data():
     return {"message": "Hello from backend"}
+
+# Checks submitted email, username, and phone number before auth0 registration so duplicate errors appear on signup page
+@app.post("/api/auth/check-profile-availability")
+def check_profile_availability(request: ProfileAvailabilityRequest):
+    user_dao = jpype.JClass("database.UserDAO") # Connectes to the Java UserDAO class to check for conflicts in the database
+    conflict = user_dao.findAuth0ProfileConflict(
+        request.username.strip().lower(),
+        str(request.email).strip().lower(),
+        request.phone_number.strip(),
+    )
+    if conflict == "database":
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to check for duplicate banking profile data",
+        )
+    if conflict:
+        labels = {
+            "username": "Username",
+            "email": "Email",
+            "phone_number": "Phone number",
+        }
+        raise HTTPException(
+            status_code=409,
+            detail=f"{labels[conflict]} is already in use",
+        )
+    # Registration can continue if no duplicate errors
+    return {"available": True}
 
 # Register
 @app.post("/api/auth/register")
@@ -396,7 +485,8 @@ def get_me(user=Depends(get_current_user)):
         "user_id": banking_user["user_id"],
         "name": banking_user["name"],
         "email": banking_user["email"],
-        "username": banking_user["username"]
+        "username": banking_user["username"],
+        "is_new_user": banking_user.get("is_new_user", False)
     }
 
 @app.get("/api/accounts")

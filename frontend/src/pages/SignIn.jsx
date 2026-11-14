@@ -34,17 +34,17 @@ export default function SignIn({ onAuthenticated }) {
     try {
       if (mfaToken) {
         const result = await verifyMfa(mfaToken, mfaCode);
-        onAuthenticated(result);
+        await onAuthenticated(result);
         return;
       }
       const result = await login(username, password);
       if (result.requiresMfa) {
         setMfaToken(result.mfaToken);
       } else {
-        onAuthenticated(result);
+        await onAuthenticated(result);
       }
     } catch (err) {
-      setError(err.message || 'Unable to sign in.');
+      setError(err.message?.includes('Invalid otp_code')? 'Invalid or expired Duo code. Please try again.' : err.message || 'Unable to sign in.');
     } finally {
       setLoading(false);
     }

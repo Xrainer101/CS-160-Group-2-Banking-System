@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
     last_name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     phone_number INTEGER NOT NULL UNIQUE,
+    date_of_birth TEXT DEFAULT NULL,
     password_hash TEXT NOT NULL,
     failed_attempts INTEGER NOT NULL DEFAULT 0,
     lock_until DATETIME DEFAULT NULL,

@@ -143,14 +143,22 @@ public final class ApiClient {
         String responseText = readResponse(responseStream);
         JSONObject responseJson = new JSONObject(responseText);
 
-        if (statusCode >= 200 && statusCode < 300) {
-            return new UserProfile(
-                responseJson.getLong("user_id"),
-                responseJson.getString("name"),
-                responseJson.getString("email"),
-                responseJson.getString("username")
-            );
+    if (statusCode >= 200 && statusCode < 300) {
+        // The backend returns the local banking profile inside banking_user
+        // Keep the top-level fallback for older backend responses
+        JSONObject bankingUser = responseJson.optJSONObject("banking_user");
+        JSONObject profileJson = bankingUser != null ? bankingUser : responseJson;
+
+        long userId = profileJson.optLong("user_id", responseJson.optLong("user_id", 0));
+        String fullName = profileJson.optString("full_name", "");
+        if (fullName.trim().isEmpty()) {
+            fullName = profileJson.optString("name", responseJson.optString("name", ""));
         }
+        String email = profileJson.optString("email", responseJson.optString("email", ""));
+        String username = profileJson.optString("username", responseJson.optString("username", ""));
+
+        return new UserProfile(userId, fullName, email, username);
+    }
         String message = responseJson.optString("detail","Could not get user profile");
         throw new ApiException(statusCode,message);
     }
@@ -190,6 +198,37 @@ public final class ApiClient {
     }
 
     // Registers a user in auth0
+    // Checks the banking database before Auth0 creates the account
+    public static void checkProfileAvailability(String email,String username,String phoneNumber) throws Exception {
+        URL url = new URL(BASE_URL + "/api/auth/check-profile-availability");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("POST");
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setDoOutput(true);
+
+        JSONObject requestBody = new JSONObject();
+        requestBody.put("email", email);
+        requestBody.put("username", username);
+        requestBody.put("phone_number", phoneNumber);
+
+        try (OutputStream outputStream = connection.getOutputStream()) {
+            outputStream.write(requestBody.toString().getBytes(StandardCharsets.UTF_8));
+        }
+
+        int statusCode = connection.getResponseCode();
+        InputStream responseStream = statusCode >= 200 && statusCode < 300
+            ? connection.getInputStream()
+            : connection.getErrorStream();
+        String response = readResponse(responseStream);
+
+        if (statusCode < 200 || statusCode >= 300) {
+            JSONObject responseJson = new JSONObject(response);
+            String message = responseJson.optString("detail","Unable to check profile availability");
+            throw new ApiException(statusCode, message);
+        }
+        connection.disconnect();
+    }
+
     public static void register(
         String email,
         String username,

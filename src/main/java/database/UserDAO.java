@@ -33,8 +33,8 @@ public class UserDAO {
     }
 
     // --- Registering an Auth0 User ---
-    public static User registerAuth0User(String auth0Sub, String username, String firstName, String lastName, String email, String phoneNumber) {
-        String userSql = "INSERT INTO users (username, first_name, last_name, email, phone_number, password_hash) VALUES (?, ?, ?, ?, ?, ?)";
+    public static User registerAuth0User(String auth0Sub, String username, String firstName, String lastName, String email, String phoneNumber, String dateOfBirth) {
+        String userSql = "INSERT INTO users (username, first_name, last_name, email, phone_number, date_of_birth, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?)";
         String identitySql = "INSERT INTO auth0_identities (auth0_sub, user_id) VALUES (?, ?)";
 
         try (Connection conn = DatabaseManager.getConnection()) {
@@ -46,7 +46,8 @@ public class UserDAO {
                 userStatement.setString(3, lastName);
                 userStatement.setString(4, email);
                 userStatement.setString(5, phoneNumber);
-                userStatement.setString(6, "auth0-managed");
+                userStatement.setString(6, dateOfBirth);
+                userStatement.setString(7, "auth0-managed");
                 userStatement.executeUpdate();
 
                 try (ResultSet generatedKeys = userStatement.getGeneratedKeys()) {
@@ -69,8 +70,33 @@ public class UserDAO {
         return getUserByAuth0Sub(auth0Sub);
     }
 
+    // Returns the first local profile field that conflicts with an Auth0 user
+    public static String findAuth0ProfileConflict(String username, String email, String phoneNumber) {
+        String[] fields = {"username", "email", "phone_number"};
+        String[] values = {username, email, phoneNumber};
+
+        try (Connection conn = DatabaseManager.getConnection()) {
+            for (int i = 0; i < fields.length; i++) {
+                String comparison = fields[i].equals("phone_number")
+                    ? "phone_number = ?"
+                    : "lower(" + fields[i] + ") = lower(?)";
+                String sql = "SELECT 1 FROM users WHERE " + comparison + " LIMIT 1";
+                try (PreparedStatement statement = conn.prepareStatement(sql)) {
+                    statement.setString(1, values[i]);
+                    try (ResultSet results = statement.executeQuery()) {
+                        if (results.next()) return fields[i];
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println("Error checking Auth0 profile conflicts: " + e.getMessage());
+            return "database";
+        }
+        return null;
+    }
+
     public static User getUserByUsername(String targetUsername) {
-        String sql = "SELECT user_id, username, first_name, last_name, email, phone_number, password_hash, role, failed_login_attempts, lockout_until, created_at FROM users WHERE username = ?";
+        String sql = "SELECT user_id, username, first_name, last_name, email, phone_number, date_of_birth, password_hash, role, failed_login_attempts, lockout_until, created_at FROM users WHERE username = ?";
 
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -115,7 +141,7 @@ public class UserDAO {
     // --- Finds a banking user by their Auth0 identifier ---
     public static User getUserByAuth0Sub(String auth0Sub) {
         String sql = "SELECT u.user_id, u.username, u.first_name, u.last_name, u.email, " +
-            "u.phone_number, u.password_hash, u.role, u.failed_login_attempts, " +
+            "u.phone_number, u.date_of_birth, u.password_hash, u.role, u.failed_login_attempts, " +
             "u.lockout_until, u.created_at " +
             "FROM users u JOIN auth0_identities ai ON ai.user_id = u.user_id " +
             "WHERE ai.auth0_sub = ?";
@@ -166,6 +192,7 @@ public class UserDAO {
             rs.getString("last_name"),
             rs.getString("email"),
             rs.getString("phone_number"),
+            rs.getString("date_of_birth"),
             rs.getString("password_hash"),
             rs.getString("role"),
             rs.getInt("failed_login_attempts"),

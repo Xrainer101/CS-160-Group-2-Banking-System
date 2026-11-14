@@ -31,12 +31,20 @@ public class DatabaseManager {
                 "last_name TEXT NOT NULL," +
                 "email TEXT NOT NULL UNIQUE," +
                 "phone_number TEXT NOT NULL UNIQUE," +
+                "date_of_birth TEXT DEFAULT NULL," +
                 "password_hash TEXT NOT NULL," +
                 "role TEXT NOT NULL DEFAULT 'customer' CHECK(role IN ('customer', 'admin', 'manager'))," +
                 "failed_login_attempts INTEGER NOT NULL DEFAULT 0," +
                 "lockout_until DATETIME DEFAULT NULL," +
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)";
             stmt.execute(createUsersTable);
+
+            // Add profile fields to databases created before Auth0 profile mapping
+            try {
+                stmt.execute("ALTER TABLE users ADD COLUMN date_of_birth TEXT DEFAULT NULL");
+            } catch (SQLException ignored) {
+                // The column already exists
+            }
 
             System.out.println("Users table created successfully.");
 

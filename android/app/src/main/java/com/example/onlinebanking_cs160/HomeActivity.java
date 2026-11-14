@@ -117,8 +117,9 @@ public class HomeActivity extends AppCompatActivity {
                     if (isFinishing() || isDestroyed()) return;
 
                     String displayName = session.getDisplayName();
-                    if (displayName == null || displayName.isEmpty()) displayName = "there";
-                    textWelcome.setText("Welcome back, " + displayName + "!");
+                    if (displayName == null || displayName.trim().isEmpty()) displayName = "there";
+                    displayName = displayName.trim();
+                    textWelcome.setText("Welcome, " + displayName + "!");
                     textAvatar.setText(displayName.substring(0, 1).toUpperCase());
                     showAccounts(response.accounts);
                 });
