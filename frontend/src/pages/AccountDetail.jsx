@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Wallet } from 'lucide-react';
 import { getAccountDetail } from '../api/bankingApi';
 import { TransactionRows } from '../components/RecentTransactions';
@@ -12,6 +12,9 @@ export default function AccountDetail({ onCloseAccount }) {
 }
 
 function AccountDetailContent({ accountId, onCloseAccount }) {
+  const [params] = useSearchParams();
+  const fromOverview = params.get('from') === 'overview';
+  const source = fromOverview ? '&from=overview' : '';
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [showNumber, setShowNumber] = useState(false);
@@ -34,7 +37,9 @@ function AccountDetailContent({ accountId, onCloseAccount }) {
   return (
     <>
       <div className="page-heading">
-        <Link className="text-link" to="/accounts">← Back to accounts</Link>
+        <Link className="text-link" to={fromOverview ? "/dashboard" : "/accounts"}>
+          {fromOverview ? "← Back to overview" : "← Back to accounts"}
+        </Link>
         <h1>Account details</h1>
       </div>
       {error ? <p role="alert">{error}</p> : !data ? (
@@ -73,6 +78,11 @@ function AccountDetailContent({ accountId, onCloseAccount }) {
               </div>
             </div>
           </article>
+          <nav className="account-detail-actions" aria-label="Account actions">
+            <Link className="button button-outline" to={`/deposit?accountId=${data.account.id}${source}`}>Deposit</Link>
+            <Link className="button button-outline" to={`/withdraw?accountId=${data.account.id}${source}`}>Withdraw</Link>
+            <Link className="button button-outline" to={`/transfers?accountId=${data.account.id}${source}`}>Transfer</Link>
+          </nav>
           <section className="panel">
             <h2>Latest activity</h2>
             <TransactionRows transactions={data.transactions} />

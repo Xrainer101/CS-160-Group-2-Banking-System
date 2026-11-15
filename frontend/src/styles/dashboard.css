@@ -70,6 +70,17 @@
   position: relative;
   overflow: hidden;
 }
+.account-detail-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.account-detail-actions .button {
+  min-width: 0;
+  padding-left: 8px;
+  padding-right: 8px;
+}
 .account-detail-card {
   min-height: 360px;
   gap: 28px;

@@ -2,6 +2,8 @@
 import os
 import sqlite3
 import json
+import re
+from decimal import Decimal
 from typing import Literal
 from urllib.request import Request, urlopen
 from datetime import datetime, timedelta, timezone
@@ -11,7 +13,7 @@ from jwt import PyJWKClient  # Gets Auth0's public keys for token validation
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware  # Backend and frontend communication
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer   # Bearer Token authentication
-from pydantic import BaseModel, EmailStr, Field # Validate request data
+from pydantic import BaseModel, EmailStr, Field, field_validator # Validate request data
 import jpype
 
 # Basic settings 
@@ -563,6 +565,54 @@ def close_account(account_id: int, user=Depends(get_current_user)):
     if not bank_account_dao.closeBankAccount(str(account.getAccountNumber())):
         raise HTTPException(status_code=500, detail="Unable to close the account")
     return {"message": "Account closed successfully"}
+
+
+class MovementRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    amount: Decimal
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def validate_amount(cls, value):
+        text = str(value).strip()
+        if not re.fullmatch(r"-?\d+(?:\.\d{1,2})?", text):
+            raise HTTPException(status_code=422, detail={"field": "amount", "message": "Enter an amount like 25 or 25.50"})
+        amount = Decimal(text)
+        if amount <= 0:
+            raise HTTPException(status_code=422, detail={"field": "amount", "message": "Enter an amount greater than $0.00"})
+        if not __import__("math").isfinite(float(amount)):
+            raise HTTPException(status_code=422, detail={"field": "amount", "message": "Enter an amount like 25 or 25.50"})
+        return amount
+
+
+@app.post("/api/accounts/{account_id}/deposit")
+def deposit_to_account(account_id: int, request: MovementRequest, user=Depends(get_current_user)):
+    return move_account_money(account_id, request, user, "deposit")
+
+
+@app.post("/api/accounts/{account_id}/withdraw")
+def withdraw_from_account(account_id: int, request: MovementRequest, user=Depends(get_current_user)):
+    return move_account_money(account_id, request, user, "withdraw")
+
+
+def move_account_money(account_id, request, user, operation):
+    bank_dao = jpype.JClass("database.BankAccountDAO")
+    accounts = bank_dao.getBankAccountsByUsername(user["banking_user"]["username"])
+    account = next((a for a in accounts if int(a.getAccountId()) == account_id), None)
+    if account is None or str(account.getStatus()) == "closed":
+        raise HTTPException(status_code=404, detail="Account not found")
+    if str(account.getStatus()) != "active":
+        raise HTTPException(status_code=409, detail="This account is not active")
+    balance = float(account.getBalance())
+    if operation == "withdraw" and request.amount > Decimal(str(balance)):
+        raise HTTPException(status_code=409, detail={
+            "field": "amount", "message": f"That's more than the ${balance:,.2f} available",
+            "available": balance,
+        })
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    if not getattr(transaction_dao, operation)(str(account.getAccountNumber()), float(request.amount)):
+        raise HTTPException(status_code=409, detail="Unable to complete the transaction. Refresh your accounts and try again.")
+    return {"message": "Transaction completed"}
 
 
 def serialize_accounts(java_accounts, include_details=False):

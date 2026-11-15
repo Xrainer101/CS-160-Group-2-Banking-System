@@ -1,7 +1,16 @@
 import { useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { money } from '../data/mockData';
-export default function Transfers({ accounts = [], transfer }) {
-  const [from, setFrom] = useState(''),
+export default function Transfers(props) {
+  const [params] = useSearchParams();
+  const initialAccountId = params.get('accountId') || '';
+  const returnTo = initialAccountId
+    ? `/accounts/${encodeURIComponent(initialAccountId)}${params.get('from') === 'overview' ? '?from=overview' : ''}` : null;
+  return <TransferForm key={initialAccountId} {...props} initialAccountId={initialAccountId} returnTo={returnTo} />;
+}
+
+function TransferForm({ accounts = [], transfer, initialAccountId, returnTo }) {
+  const [from, setFrom] = useState(initialAccountId),
     [to, setTo] = useState(''),
     [amount, setAmount] = useState(''),
     [error, setError] = useState('');
@@ -18,6 +27,7 @@ export default function Transfers({ accounts = [], transfer }) {
   return (
     <>
       <div className="page-heading">
+        {returnTo && <Link className="text-link" to={returnTo}>← Back to account details</Link>}
         <span className="eyebrow">MOVE MONEY</span>
         <h1>Transfers</h1>
         <p>Practice moving money between demo accounts.</p>

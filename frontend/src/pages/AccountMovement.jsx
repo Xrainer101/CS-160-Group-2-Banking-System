@@ -1,31 +1,58 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { money } from '../data/mockData';
+import MovementModal from '../components/MovementModal';
 
-export default function AccountMovement({ accounts = [], kind }) {
-  const [selectedAccount, setSelectedAccount] = useState('');
+export default function AccountMovement(props) {
+  const [params] = useSearchParams();
+  const initialAccountId = params.get('accountId') || '';
+  const returnTo = initialAccountId
+    ? `/accounts/${encodeURIComponent(initialAccountId)}${params.get('from') === 'overview' ? '?from=overview' : ''}` : null;
+  return <AccountMovementForm key={initialAccountId} {...props} initialAccountId={initialAccountId} returnTo={returnTo} />;
+}
+
+function AccountMovementForm({ accounts = [], kind, onMove, initialAccountId, returnTo }) {
+  const [selectedAccount, setSelectedAccount] = useState(initialAccountId);
   const [amount, setAmount] = useState('');
-  const [memo, setMemo] = useState('');
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState(null);
+  const amountRef = useRef(null);
+  const activeAccounts = accounts.filter(account => account.status === 'active');
+  const account = activeAccounts.find(account => String(account.id) === selectedAccount) || activeAccounts[0];
   const title = kind === 'deposit' ? 'Deposit' : 'Withdraw';
-  const accountId = accounts.some(account => String(account.id) === selectedAccount)
-    ? selectedAccount : String(accounts[0]?.id ?? '');
+
+  function submit(event) {
+    event.preventDefault();
+    const text = amount.trim();
+    let warning = '';
+    if (!/^-?\d+(?:\.\d{1,2})?$/.test(text) || !Number.isFinite(Number(text))) {
+      warning = 'Enter an amount like 25 or 25.50';
+    } else if (Number(text) <= 0) {
+      warning = 'Enter an amount greater than $0.00';
+    } else if (kind === 'withdraw' && Number(text) > account?.available) {
+      warning = `That's more than the ${money(account.available)} available`;
+    }
+    setError(warning);
+    if (warning) { amountRef.current?.focus(); return; }
+    if (account) setPending({ account, amount: text });
+  }
 
   return (
     <>
       <div className="page-heading">
-        <span className="eyebrow">MOVE MONEY</span>
-        <h1>{title}</h1>
+        {returnTo && <Link className="text-link" to={returnTo}>← Back to account details</Link>}
+        <span className="eyebrow">MOVE MONEY</span><h1>{title}</h1>
       </div>
       <section className="panel">
         <h2>{title} money</h2>
-        <p className="panel-subtitle">Coming soon.</p>
-        {!accounts.length && <p className="empty">No accounts available.</p>}
-        <form className="stacked-form" onSubmit={event => event.preventDefault()}>
+        {!activeAccounts.length && <p className="empty">No active accounts available.</p>}
+        <form className="stacked-form" noValidate onSubmit={submit}>
           <label>
             {kind === 'deposit' ? 'Deposit to' : 'Withdraw from'}
-            <select value={accountId} disabled={!accounts.length}
-              onChange={event => setSelectedAccount(event.target.value)}>
-              {!accounts.length && <option value="">No accounts available</option>}
-              {accounts.map(account => (
+            <select value={account?.id ?? ''} disabled={!activeAccounts.length}
+              onChange={event => { setSelectedAccount(event.target.value); setError(''); }}>
+              {!activeAccounts.length && <option value="">No active accounts available</option>}
+              {activeAccounts.map(account => (
                 <option key={account.id} value={account.id}>
                   {account.type} {account.number} — {money(account.available)} available
                 </option>
@@ -34,16 +61,18 @@ export default function AccountMovement({ accounts = [], kind }) {
           </label>
           <label>
             Amount (USD)
-            <input type="number" min="0.01" step="0.01" placeholder="0.00"
-              value={amount} onChange={event => setAmount(event.target.value)} />
+            <input ref={amountRef} type="text" inputMode="decimal" placeholder="0.00"
+              aria-invalid={Boolean(error)} aria-describedby={error ? 'amount-error' : undefined}
+              value={amount} onChange={event => { setAmount(event.target.value); setError(''); }} />
           </label>
-          <label>
-            Memo (optional)
-            <input type="text" value={memo} onChange={event => setMemo(event.target.value)} />
-          </label>
-          <button type="submit" className="button button-primary" disabled>{title}</button>
+          {error && <p id="amount-error" className="form-error" role="alert">{error}</p>}
+          <label>Memo (optional)<input type="text" disabled /></label>
+          <button type="submit" className="button button-primary" disabled={!account || Boolean(pending)}>{title}</button>
         </form>
       </section>
+      {pending && <MovementModal kind={kind} pending={pending} onMove={onMove}
+        onFieldError={message => { setPending(null); setError(message); amountRef.current?.focus(); }}
+        onDismiss={completed => { setPending(null); if (completed) setAmount(''); }} />}
     </>
   );
 }

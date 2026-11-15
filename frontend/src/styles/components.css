@@ -1,3 +1,7 @@
+.stacked-form input[aria-invalid="true"] {
+  border-color: #bc3143;
+  outline-color: #bc3143;
+}
 .close-account-footer {
   text-align: center;
   margin: 32px 0;

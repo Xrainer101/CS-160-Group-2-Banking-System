@@ -40,6 +40,7 @@ import {
   getCurrentUser,
   createAccount,
   closeAccount,
+  moveAccountMoney,
 } from "./api/bankingApi";
 
 import "./index.css";
@@ -179,6 +180,34 @@ function AppContent() {
     } catch (error) {
       if (version === sessionVersionRef.current) throw error;
       return false;
+    }
+  }
+
+  async function refreshMovement(version) {
+    const data = await getAccounts();
+    if (version !== sessionVersionRef.current) return null;
+    setAccounts(data.accounts || []);
+    setTransactions(data.transactions || []);
+    return data.accounts || [];
+  }
+
+  async function handleMovement(accountId, kind, amount) {
+    const version = sessionVersionRef.current;
+    try {
+      await moveAccountMoney(accountId, kind, amount);
+    } catch (error) {
+      if (version === sessionVersionRef.current) throw error;
+      return null;
+    }
+    if (version !== sessionVersionRef.current) return null;
+    const refresh = async () => {
+      const accounts = await refreshMovement(version);
+      return accounts?.find(account => String(account.id) === String(accountId)) || null;
+    };
+    try {
+      return { account: await refresh(), refresh };
+    } catch {
+      return { account: null, refresh };
     }
   }
 
@@ -560,11 +589,11 @@ function AppContent() {
                       />
                       <Route
                         path="/deposit"
-                        element={<AccountMovement key="deposit" kind="deposit" accounts={accounts} />}
+                        element={<AccountMovement key={session?.access_token + ":deposit"} kind="deposit" accounts={accounts} onMove={handleMovement} />}
                       />
                       <Route
                         path="/withdraw"
-                        element={<AccountMovement key="withdraw" kind="withdraw" accounts={accounts} />}
+                        element={<AccountMovement key={session?.access_token + ":withdraw"} kind="withdraw" accounts={accounts} onMove={handleMovement} />}
                       />
 
                       <Route

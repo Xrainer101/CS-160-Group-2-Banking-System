@@ -49,6 +49,12 @@ export function getAccountDetail(accountId, signal) {
     return request(`/api/accounts/${encodeURIComponent(accountId)}`, { signal });
 }
 
+export function moveAccountMoney(accountId, kind, amount) {
+    return request(`/api/accounts/${encodeURIComponent(accountId)}/${kind}`, {
+        method: 'POST', body: JSON.stringify({ amount }),
+    });
+}
+
 export function getAccounts() {
     return request('/api/accounts');
 }
