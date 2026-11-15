@@ -2,14 +2,20 @@ package database;
 
 import androidx.annotation.Nullable;
 
-/** One bill from the scheduled_payments table (with the paying account's type joined in). */
+/**
+ * One row of the scheduled_payments table: a bill, or a transfer that's sent on a date or on
+ * repeat. (The paying account's type is joined in for display.)
+ */
 public class ScheduledPayment {
     public static final String STATUS_SCHEDULED = "scheduled";
     public static final String STATUS_PAID = "paid";
     public static final String STATUS_FAILED = "failed";
     public static final String STATUS_CANCELLED = "cancelled";
 
-    // how frequently u want 2 pay a bill...
+    public static final String KIND_BILL = "bill";
+    public static final String KIND_TRANSFER = "transfer";
+
+    // How often it repeats. Together with repeatEvery: ("weekly", 2) = every 2 weeks.
     public static final String FREQUENCY_ONCE = "once";
     public static final String FREQUENCY_DAILY = "daily";
     public static final String FREQUENCY_WEEKLY = "weekly";
@@ -17,19 +23,25 @@ public class ScheduledPayment {
     public static final String FREQUENCY_YEARLY = "yearly";
 
     private final long paymentId;
-    private final String payee;
+    private final String payee;           // bill: who's paid. transfer: where it goes, e.g. "Savings •••• 7391"
     private final double amount;
-    private final String dueDate;         // "yyyy-MM-dd"; for a repeating bill, the next payment date
+    private final String dueDate;         // "yyyy-MM-dd"; for a repeating one, the next date
     private final String status;
     @Nullable private final String failureReason;
-    private final String accountNumber;
+    private final String accountNumber;   // the account the money comes from
     private final String accountType;
     private final String frequency;
     private final int repeatEvery;
+    private final String kind;
+    @Nullable private final String toAccountNumber;   // transfers only
+    @Nullable private final String toRoutingNumber;   // transfers to another bank only
+    @Nullable private final String memo;
 
     public ScheduledPayment(long paymentId, String payee, double amount, String dueDate, String status,
                             @Nullable String failureReason, String accountNumber, String accountType,
-                            String frequency, int repeatEvery) {
+                            String frequency, int repeatEvery, String kind,
+                            @Nullable String toAccountNumber, @Nullable String toRoutingNumber,
+                            @Nullable String memo) {
         this.paymentId = paymentId;
         this.payee = payee;
         this.amount = amount;
@@ -40,6 +52,10 @@ public class ScheduledPayment {
         this.accountType = accountType;
         this.frequency = frequency;
         this.repeatEvery = Math.max(1, repeatEvery);
+        this.kind = kind == null ? KIND_BILL : kind;
+        this.toAccountNumber = toAccountNumber;
+        this.toRoutingNumber = toRoutingNumber;
+        this.memo = memo;
     }
 
     public long getPaymentId() { return paymentId; }
@@ -51,11 +67,21 @@ public class ScheduledPayment {
     public String getAccountNumber() { return accountNumber; }
     public String getFrequency() { return frequency; }
     public int getRepeatEvery() { return repeatEvery; }
+    public String getKind() { return kind; }
+    @Nullable public String getToAccountNumber() { return toAccountNumber; }
+    @Nullable public String getToRoutingNumber() { return toRoutingNumber; }
+    @Nullable public String getMemo() { return memo; }
 
     public boolean isFailed() { return STATUS_FAILED.equals(status); }
+    public boolean isTransfer() { return KIND_TRANSFER.equals(kind); }
 
-    /** True for any bill that repeats (daily, weekly, monthly or yearly). */
+    /** True for anything that repeats (daily, weekly, monthly or yearly). */
     public boolean isRecurring() { return frequency != null && !FREQUENCY_ONCE.equals(frequency); }
+
+    /** Title for lists: the payee for a bill, "Transfer to Savings •••• 7391" for a transfer. */
+    public String getTitle() {
+        return isTransfer() ? "Transfer to " + payee : payee;
+    }
 
     /** "Weekly", "Every 2 weeks", "Monthly", "Every 3 months", "Yearly"... */
     public String getFrequencyText() {

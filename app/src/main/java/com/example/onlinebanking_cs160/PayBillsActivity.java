@@ -1,16 +1,13 @@
 package com.example.onlinebanking_cs160;
 
-import android.app.DatePickerDialog;
 import android.os.Bundle;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 
@@ -19,9 +16,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -30,43 +25,32 @@ import database.DatabaseManager;
 import database.OperationResult;
 import database.ScheduledPayment;
 
-/** Schedule one-time or repeating bills, and see / cancel / retry upcoming ones. */
+/**
+ * Schedule one-time or repeating bills, and see / edit / stop / retry upcoming bills and
+ * scheduled transfers (transfers are set up on the Transfer screen and listed here too).
+ */
 public class PayBillsActivity extends AppCompatActivity {
-
-    // Choices in the "Repeat" drop-down: label, frequency, every N. The last one is "Custom...".
-    private static final String[] REPEAT_LABELS = {
-            "One time", "Every week", "Every 2 weeks", "Every month", "Every 3 months", "Every year", "Custom…"};
-    private static final String[] REPEAT_FREQUENCIES = {
-            ScheduledPayment.FREQUENCY_ONCE, ScheduledPayment.FREQUENCY_WEEKLY, ScheduledPayment.FREQUENCY_WEEKLY,
-            ScheduledPayment.FREQUENCY_MONTHLY, ScheduledPayment.FREQUENCY_MONTHLY, ScheduledPayment.FREQUENCY_YEARLY,
-            null};
-    private static final int[] REPEAT_EVERY = {1, 1, 2, 1, 3, 1, 0};
-    private static final int CUSTOM = REPEAT_LABELS.length - 1;
-
-    // Units in the "Custom" row: Every [N] [days / weeks / months / years]
-    private static final String[] UNIT_LABELS = {"days", "weeks", "months", "years"};
-    private static final String[] UNIT_FREQUENCIES = {
-            ScheduledPayment.FREQUENCY_DAILY, ScheduledPayment.FREQUENCY_WEEKLY,
-            ScheduledPayment.FREQUENCY_MONTHLY, ScheduledPayment.FREQUENCY_YEARLY};
-
     private final ExecutorService executorService = Executors.newSingleThreadExecutor();
     private DatabaseManager databaseManager;
     private long userId;
 
     private List<Account> accounts = new ArrayList<>();
     private String dueDate = DatabaseManager.today(); // "yyyy-MM-dd"
+    /** The bill/transfer being edited, or null when the form is for a new bill. */
+    private ScheduledPayment editing;
 
+    private TextView textFormTitle;
+    private TextView textFormSubtitle;
+    private TextView labelPayee;
+    private TextView labelDate;
     private EditText editPayee;
     private EditText editAmount;
     private Spinner spinnerFrom;
     private TextView textDate;
-    private Spinner spinnerRepeat;
-    private View groupCustomRepeat;
-    private EditText editRepeatEvery;
-    private Spinner spinnerRepeatUnit;
-    private TextView textRepeatHint;
+    private RepeatPicker repeatPicker;
     private TextView textError;
     private Button buttonSchedule;
+    private Button buttonCancelEdit;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -83,45 +67,28 @@ public class PayBillsActivity extends AppCompatActivity {
         userId = session.getUserId();
         databaseManager = DatabaseManager.getInstance(this);
 
+        textFormTitle = findViewById(R.id.textFormTitle);
+        textFormSubtitle = findViewById(R.id.textFormSubtitle);
+        labelPayee = findViewById(R.id.labelPayee);
+        labelDate = findViewById(R.id.labelDate);
         editPayee = findViewById(R.id.editPayee);
         editAmount = findViewById(R.id.editAmount);
         spinnerFrom = findViewById(R.id.spinnerFrom);
         textDate = findViewById(R.id.textDate);
-        spinnerRepeat = findViewById(R.id.spinnerRepeat);
-        groupCustomRepeat = findViewById(R.id.groupCustomRepeat);
-        editRepeatEvery = findViewById(R.id.editRepeatEvery);
-        spinnerRepeatUnit = findViewById(R.id.spinnerRepeatUnit);
-        textRepeatHint = findViewById(R.id.textRepeatHint);
         textError = findViewById(R.id.textError);
         buttonSchedule = findViewById(R.id.buttonSchedule);
+        buttonCancelEdit = findViewById(R.id.buttonCancelEdit);
 
-        spinnerRepeat.setAdapter(adapter(REPEAT_LABELS));
-        spinnerRepeatUnit.setAdapter(adapter(UNIT_LABELS));
-        spinnerRepeatUnit.setSelection(1); // weeks
-
-        AdapterView.OnItemSelectedListener refresh = new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) { showRepeatHint(); }
-            @Override public void onNothingSelected(AdapterView<?> p) { }
-        };
-        spinnerRepeat.setOnItemSelectedListener(refresh);
-        spinnerRepeatUnit.setOnItemSelectedListener(refresh);
-        editRepeatEvery.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
-            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
-            @Override public void afterTextChanged(Editable s) { showRepeatHint(); }
-        });
-
+        repeatPicker = new RepeatPicker(this, () -> dueDate, "Paid");
         showDate();
-        textDate.setOnClickListener(v -> pickDate());
-        buttonSchedule.setOnClickListener(v -> schedule());
+        textDate.setOnClickListener(v -> Ui.pickDate(this, dueDate, date -> {
+            dueDate = date;
+            showDate();
+        }));
+        buttonSchedule.setOnClickListener(v -> save());
+        buttonCancelEdit.setOnClickListener(v -> stopEditing());
 
         load();
-    }
-
-    private ArrayAdapter<String> adapter(String[] items) {
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, R.layout.item_spinner, items);
-        adapter.setDropDownViewResource(R.layout.item_spinner);
-        return adapter;
     }
 
     private void load() {
@@ -134,7 +101,9 @@ public class PayBillsActivity extends AppCompatActivity {
                 List<String> labels = new ArrayList<>();
                 for (Account a : accounts) labels.add(Ui.accountLabel(a));
                 int keep = spinnerFrom.getSelectedItemPosition();
-                spinnerFrom.setAdapter(adapter(labels.toArray(new String[0])));
+                ArrayAdapter<String> adapter = new ArrayAdapter<>(this, R.layout.item_spinner, labels);
+                adapter.setDropDownViewResource(R.layout.item_spinner);
+                spinnerFrom.setAdapter(adapter);
                 if (keep >= 0 && keep < labels.size()) spinnerFrom.setSelection(keep);
                 showPayments(payments);
             });
@@ -154,78 +123,20 @@ public class PayBillsActivity extends AppCompatActivity {
         findViewById(R.id.textNoPayments).setVisibility(payments.isEmpty() ? View.VISIBLE : View.GONE);
     }
 
-    // ------------------------------------------------------------------
-    // Date picker
-    // ------------------------------------------------------------------
-
-    private void pickDate() {
-        Calendar current = Calendar.getInstance();
-        java.util.Date parsed = Ui.parseDueDate(dueDate);
-        if (parsed != null) current.setTime(parsed);
-
-        DatePickerDialog dialog = new DatePickerDialog(this, (view, year, month, day) -> {
-            dueDate = String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, day);
-            showDate();
-        }, current.get(Calendar.YEAR), current.get(Calendar.MONTH), current.get(Calendar.DAY_OF_MONTH));
-        // No dates in the past
-        dialog.getDatePicker().setMinDate(System.currentTimeMillis() - 1000);
-        dialog.show();
-    }
-
     private void showDate() {
         textDate.setText(Ui.friendlyDueDate(dueDate));
-        showRepeatHint();
+        repeatPicker.refresh();
     }
 
     // ------------------------------------------------------------------
-    // How often
+    // New bill, or saving an edit
     // ------------------------------------------------------------------
 
-    /** The chosen frequency ("once", "weekly"...), reading the Custom row if Custom is picked. */
-    private String chosenFrequency() {
-        int i = spinnerRepeat.getSelectedItemPosition();
-        if (i == CUSTOM) {
-            int unit = spinnerRepeatUnit.getSelectedItemPosition();
-            return UNIT_FREQUENCIES[unit < 0 ? 1 : unit];
-        }
-        return REPEAT_FREQUENCIES[Math.max(0, i)];
-    }
-
-    /** The chosen "every N", or -1 if the Custom number box isn't a number. */
-    private int chosenEvery() {
-        int i = spinnerRepeat.getSelectedItemPosition();
-        if (i != CUSTOM) return REPEAT_EVERY[Math.max(0, i)];
-        try {
-            return Integer.parseInt(editRepeatEvery.getText().toString().trim());
-        } catch (NumberFormatException e) {
-            return -1;
-        }
-    }
-
-    /** The line under the Repeat choice, e.g. "Paid every 2 weeks, starting Nov 2, 2026." */
-    private void showRepeatHint() {
-        if (spinnerRepeat == null || textRepeatHint == null) return;
-        groupCustomRepeat.setVisibility(spinnerRepeat.getSelectedItemPosition() == CUSTOM ? View.VISIBLE : View.GONE);
-
-        String frequency = chosenFrequency();
-        int every = chosenEvery();
-        String problem = DatabaseManager.checkFrequency(frequency, every);
-        if (problem != null) {
-            textRepeatHint.setText(problem);
-        } else {
-            textRepeatHint.setText(Ui.scheduleSentence(frequency, every, dueDate)
-                    + (ScheduledPayment.FREQUENCY_ONCE.equals(frequency) ? "" : " Stop it any time from the list below."));
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Schedule
-    // ------------------------------------------------------------------
-
-    private void schedule() {
+    private void save() {
         textError.setVisibility(View.GONE);
+        boolean isTransfer = editing != null && editing.isTransfer();
         String payee = editPayee.getText().toString().trim();
-        if (payee.isEmpty()) {
+        if (!isTransfer && payee.isEmpty()) {
             editPayee.setError("Enter who you're paying");
             editPayee.requestFocus();
             return;
@@ -237,44 +148,44 @@ public class PayBillsActivity extends AppCompatActivity {
             editAmount.requestFocus();
             return;
         }
-        String frequency = chosenFrequency();
-        int every = chosenEvery();
-        String frequencyProblem = DatabaseManager.checkFrequency(frequency, every);
-        if (frequencyProblem != null) {
-            editRepeatEvery.setError(frequencyProblem);
-            editRepeatEvery.requestFocus();
-            return;
-        }
+        if (repeatPicker.validate() != null) return;
         int i = spinnerFrom.getSelectedItemPosition();
         if (i < 0 || i >= accounts.size()) {
             showError("Open an account first so there's something to pay from.");
             return;
         }
         Account from = accounts.get(i);
+        String frequency = repeatPicker.frequency();
+        int every = repeatPicker.every();
         boolean once = ScheduledPayment.FREQUENCY_ONCE.equals(frequency);
-        boolean payToday = DatabaseManager.today().equals(dueDate);
+        boolean today = DatabaseManager.today().equals(dueDate);
 
-        String question = "Pay " + Ui.money(amount) + " to " + payee + " from your " + from.getDisplayName() + ".\n\n"
+        String what = isTransfer ? editing.getTitle() : "Pay " + Ui.money(amount) + " to " + payee;
+        String question = (editing != null ? "Save these changes?\n\n" : "")
+                + (isTransfer ? what + ", " + Ui.money(amount) : what) + " from your " + from.getDisplayName() + ".\n\n"
                 + Ui.scheduleSentence(frequency, every, dueDate);
 
         new AlertDialog.Builder(this)
                 .setTitle("Please confirm")
                 .setMessage(question)
-                .setPositiveButton(payToday && once ? "Pay now" : "Schedule",
-                        (d, w) -> save(from, payee, amount, frequency, every, payToday))
+                .setPositiveButton(editing != null ? "Save" : today && once ? "Pay now" : "Schedule",
+                        (d, w) -> saveConfirmed(from, payee, amount, frequency, every, today))
                 .setNegativeButton("Cancel", null)
                 .show();
     }
 
-    private void save(Account from, String payee, double amount, String frequency, int every, boolean payToday) {
+    private void saveConfirmed(Account from, String payee, double amount, String frequency, int every, boolean today) {
         buttonSchedule.setEnabled(false);
         String date = dueDate;
-        boolean once = ScheduledPayment.FREQUENCY_ONCE.equals(frequency);
+        ScheduledPayment edited = editing;
         executorService.execute(() -> {
-            OperationResult result = databaseManager.schedulePayment(
-                    userId, from.getAccountNumber(), payee, amount, date, frequency, every);
-            // A bill due today is paid straight away
-            DatabaseManager.PaymentRunResult run = result.success && payToday
+            OperationResult result = edited != null
+                    ? databaseManager.updatePayment(userId, edited.getPaymentId(), from.getAccountNumber(),
+                            edited.isTransfer() ? null : payee, amount, date, frequency, every)
+                    : databaseManager.schedulePayment(userId, from.getAccountNumber(), payee, amount, date,
+                            frequency, every);
+            // Anything due today is paid straight away
+            DatabaseManager.PaymentRunResult run = result.success && today
                     ? databaseManager.processDuePayments(userId) : null;
 
             runOnUiThread(() -> {
@@ -285,66 +196,108 @@ public class PayBillsActivity extends AppCompatActivity {
                     return;
                 }
                 if (run != null && run.failed > 0) {
-                    showError("The payment couldn't be made today. Check the list below for the reason.");
-                } else if (payToday) {
-                    Ui.toast(this, "Paid " + Ui.money(amount) + " to " + payee + "."
-                            + (once ? "" : " The next one is in the list below."));
+                    showError("Today's payment couldn't be made. Check the list below for the reason.");
+                } else if (run != null && run.paid > 0) {
+                    Ui.toast(this, "Paid " + Ui.money(amount) + " today."
+                            + (ScheduledPayment.FREQUENCY_ONCE.equals(frequency) ? "" : " The next one is in the list below."));
                 } else {
                     Ui.toast(this, result.message);
                 }
-                editPayee.setText("");
-                editAmount.setText("");
-                spinnerRepeat.setSelection(0);
+                stopEditing();
                 load();
             });
         });
     }
 
     // ------------------------------------------------------------------
-    // Tapping a bill in the list
+    // Edit mode
+    // ------------------------------------------------------------------
+
+    /** Fills the form with a scheduled bill/transfer so it can be changed. */
+    private void startEditing(ScheduledPayment p) {
+        editing = p;
+        textError.setVisibility(View.GONE);
+        textFormTitle.setText(p.isTransfer() ? "Edit transfer" : "Edit payment");
+        textFormSubtitle.setText(p.isTransfer()
+                ? "Change the amount, the account it comes from, the next date or how often it repeats. "
+                    + "To send it somewhere else, stop it and set up a new transfer."
+                : "Change who's paid, the amount, the account, the next date or how often it repeats.");
+        labelPayee.setText(p.isTransfer() ? "Sends to" : "Pay to");
+        editPayee.setText(p.getPayee());
+        editPayee.setEnabled(!p.isTransfer());
+        editAmount.setText(String.format(java.util.Locale.US, "%.2f", p.getAmount()));
+        for (int i = 0; i < accounts.size(); i++) {
+            if (accounts.get(i).getAccountNumber().equals(p.getAccountNumber())) spinnerFrom.setSelection(i);
+        }
+        // A failed one's date has passed: start from today
+        dueDate = p.getDueDate().compareTo(DatabaseManager.today()) < 0 ? DatabaseManager.today() : p.getDueDate();
+        labelDate.setText(p.isRecurring() ? "Next payment on" : "Pay on");
+        repeatPicker.set(p.getFrequency(), p.getRepeatEvery());
+        showDate();
+        buttonSchedule.setText("Save changes");
+        buttonCancelEdit.setVisibility(View.VISIBLE);
+        ScrollView scroll = findViewById(R.id.scrollContent);
+        scroll.post(() -> scroll.smoothScrollTo(0, 0));
+    }
+
+    private void stopEditing() {
+        editing = null;
+        textFormTitle.setText("Pay a bill");
+        textFormSubtitle.setText("Pick a date and the money is paid from your account on that day.");
+        labelPayee.setText("Pay to");
+        labelDate.setText("Pay on");
+        editPayee.setEnabled(true);
+        editPayee.setText("");
+        editAmount.setText("");
+        dueDate = DatabaseManager.today();
+        repeatPicker.reset();
+        showDate();
+        buttonSchedule.setText("Schedule payment");
+        buttonCancelEdit.setVisibility(View.GONE);
+    }
+
+    // ------------------------------------------------------------------
+    // Tapping something in the list
     // ------------------------------------------------------------------
 
     private void onPaymentTapped(ScheduledPayment p) {
-        if (p.isFailed() && p.isRecurring()) {
-            // Failed repeating bill: try again now, skip just this one, or stop it for good
-            new AlertDialog.Builder(this)
-                    .setTitle(p.getPayee() + " · " + Ui.money(p.getAmount()))
-                    .setMessage(p.getFrequencyText() + ". This payment failed: " + p.getFailureReason()
-                            + "\n\nTry again pays it now from your " + p.getAccountDisplayName()
-                            + ". Skip leaves this one unpaid and waits for the next date.")
-                    .setPositiveButton("Try again", (d, w) -> retry(p))
-                    .setNeutralButton("Skip", (d, w) -> skip(p))
-                    .setNegativeButton("Stop payments", (d, w) -> confirmStop(p))
-                    .show();
-        } else if (p.isRecurring()) {
-            confirmStop(p);
-        } else if (p.isFailed()) {
-            new AlertDialog.Builder(this)
-                    .setTitle(p.getPayee() + " · " + Ui.money(p.getAmount()))
-                    .setMessage("This payment failed: " + p.getFailureReason()
-                            + "\n\nTry again pays it now from your " + p.getAccountDisplayName() + ".")
-                    .setPositiveButton("Try again", (d, w) -> retry(p))
-                    .setNeutralButton("Remove", (d, w) -> cancel(p))
-                    .setNegativeButton("Close", null)
-                    .show();
-        } else {
-            new AlertDialog.Builder(this)
-                    .setTitle(p.getPayee())
-                    .setMessage("Cancel the " + Ui.money(p.getAmount()) + " payment to " + p.getPayee()
-                            + " on " + Ui.friendlyDueDate(p.getDueDate()) + "?")
-                    .setPositiveButton("Cancel payment", (d, w) -> cancel(p))
-                    .setNegativeButton("Keep", null)
-                    .show();
+        String title = p.getTitle() + " · " + Ui.money(p.getAmount());
+        String details = p.isFailed()
+                ? "This payment failed: " + p.getFailureReason()
+                : (p.isRecurring() ? p.getFrequencyText() + ". Next: " : "On ") + Ui.friendlyDueDate(p.getDueDate())
+                    + ", from " + p.getAccountDisplayName() + ".";
+
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        if (p.isFailed()) {
+            labels.add("Try again now");
+            actions.add(() -> retry(p));
         }
+        labels.add("Edit");
+        actions.add(() -> startEditing(p));
+        if (p.isFailed() && p.isRecurring()) {
+            labels.add("Skip this one");
+            actions.add(() -> skip(p));
+        }
+        labels.add(p.isRecurring() ? "Stop all future payments" : p.isFailed() ? "Remove" : "Cancel payment");
+        actions.add(() -> confirmCancel(p));
+
+        new AlertDialog.Builder(this)
+                .setTitle(title + "\n" + details)
+                .setItems(labels.toArray(new String[0]), (d, which) -> actions.get(which).run())
+                .setNegativeButton("Close", null)
+                .show();
     }
 
-    private void confirmStop(ScheduledPayment p) {
+    private void confirmCancel(ScheduledPayment p) {
+        String message = p.isRecurring()
+                ? p.getFrequencyText() + ", " + Ui.money(p.getAmount()) + ". Stopping cancels all future payments. "
+                    + "Payments already made stay in your history."
+                : "Cancel " + p.getTitle() + " (" + Ui.money(p.getAmount()) + ") on " + Ui.friendlyDueDate(p.getDueDate()) + "?";
         new AlertDialog.Builder(this)
-                .setTitle("Stop payments to " + p.getPayee() + "?")
-                .setMessage(p.getFrequencyText() + ", " + Ui.money(p.getAmount()) + ". Next payment: "
-                        + Ui.friendlyDueDate(p.getDueDate()) + ".\n\nStopping cancels all future payments. "
-                        + "Payments already made stay in your history.")
-                .setPositiveButton("Stop payments", (d, w) -> cancel(p))
+                .setTitle(p.isRecurring() ? "Stop " + p.getTitle() + "?" : "Cancel this payment?")
+                .setMessage(message)
+                .setPositiveButton(p.isRecurring() ? "Stop payments" : "Cancel payment", (d, w) -> cancel(p))
                 .setNegativeButton("Keep", null)
                 .show();
     }
@@ -361,7 +314,7 @@ public class PayBillsActivity extends AppCompatActivity {
                     new AlertDialog.Builder(this)
                             .setTitle("Payment failed again")
                             .setMessage(result.message
-                                    + "\n\nAdd money to the account (Deposit or Transfer), then try again.")
+                                    + "\n\nAdd money to the account (Deposit or Transfer), or Edit it to pay from another account.")
                             .setPositiveButton("OK", null)
                             .show();
                 }
@@ -385,6 +338,7 @@ public class PayBillsActivity extends AppCompatActivity {
             OperationResult result = databaseManager.cancelPayment(userId, p.getPaymentId());
             runOnUiThread(() -> {
                 Ui.toast(this, result.message);
+                if (editing != null && editing.getPaymentId() == p.getPaymentId()) stopEditing();
                 load();
             });
         });

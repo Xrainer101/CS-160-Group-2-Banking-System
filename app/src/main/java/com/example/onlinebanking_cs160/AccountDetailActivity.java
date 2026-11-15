@@ -12,13 +12,16 @@ import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import database.Account;
+import database.AccountRemovalCheck;
 import database.DatabaseManager;
 import database.OperationResult;
+import database.ScheduledPayment;
 import database.Transaction;
 
 /** Details for one account. Open with AccountDetailActivity.open(context, accountNumber). */
@@ -70,7 +73,7 @@ public class AccountDetailActivity extends AppCompatActivity {
                 MoveMoneyActivity.open(this, MoveMoneyActivity.MODE_WITHDRAW, accountNumber));
         findViewById(R.id.buttonTransfer).setOnClickListener(v ->
                 MoveMoneyActivity.open(this, MoveMoneyActivity.MODE_TRANSFER, accountNumber));
-        findViewById(R.id.buttonCloseAccount).setOnClickListener(v -> confirmClose());
+        findViewById(R.id.buttonCloseAccount).setOnClickListener(v -> confirmRemove());
     }
 
     @Override
@@ -130,40 +133,124 @@ public class AccountDetailActivity extends AppCompatActivity {
     }
 
     // ------------------------------------------------------------------
-    // Close account
+    // Remove account (with checks first)
     // ------------------------------------------------------------------
 
-    private void confirmClose() {
+    /**
+     * Checks everything before removing the account:
+     *  1. money left           -> must be moved out first (offers Transfer / Withdraw)
+     *  2. scheduled payments   -> bills/transfers paid FROM it can move to another account or be cancelled
+     *  3. incoming transfers   -> transfers scheduled INTO it will be cancelled
+     *  4. debit card           -> moves to another checking account, or is cancelled
+     *  5. last open account    -> warned
+     */
+    private void confirmRemove() {
         if (account == null) return;
+        executorService.execute(() -> {
+            AccountRemovalCheck check = databaseManager.getRemovalCheck(userId, accountNumber);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (check == null) {
+                    Ui.toast(this, "This account can't be removed.");
+                    return;
+                }
+                if (check.hasMoneyLeft()) {
+                    askToMoveMoney(check);
+                } else {
+                    showRemovalSummary(check);
+                }
+            });
+        });
+    }
 
-        if (Math.round(account.getBalance() * 100) != 0) {
-            // Money has to go somewhere first
-            new AlertDialog.Builder(this)
-                    .setTitle("Move your money first")
-                    .setMessage("This account still has " + Ui.money(account.getBalance())
-                            + ". Transfer or withdraw it, then you can close the account.")
-                    .setPositiveButton("Transfer", (d, w) ->
-                            MoveMoneyActivity.open(this, MoveMoneyActivity.MODE_TRANSFER, accountNumber))
-                    .setNegativeButton("Cancel", null)
-                    .show();
-            return;
-        }
-
+    private void askToMoveMoney(AccountRemovalCheck check) {
         new AlertDialog.Builder(this)
-                .setTitle("Close " + account.getDisplayName() + "?")
-                .setMessage("You won't be able to use this account after it's closed. "
-                        + "Any bills scheduled from it will be cancelled.")
-                .setPositiveButton("Close account", (d, w) -> close())
-                .setNegativeButton("Keep it", null)
+                .setTitle("Move your money first")
+                .setMessage("This account still has " + Ui.money(check.account.getBalance())
+                        + ". Transfer it to another account or withdraw it, then you can remove the account.")
+                .setPositiveButton("Transfer", (d, w) ->
+                        MoveMoneyActivity.open(this, MoveMoneyActivity.MODE_TRANSFER, accountNumber))
+                .setNeutralButton("Withdraw", (d, w) ->
+                        MoveMoneyActivity.open(this, MoveMoneyActivity.MODE_WITHDRAW, accountNumber))
+                .setNegativeButton("Cancel", null)
                 .show();
     }
 
-    private void close() {
+    private void showRemovalSummary(AccountRemovalCheck check) {
+        StringBuilder message = new StringBuilder("Before removing ").append(check.account.getDisplayName())
+                .append(", please check:\n\n✓ No money left in it ($0.00).");
+
+        if (!check.outgoing.isEmpty()) {
+            message.append("\n\n• ").append(check.outgoing.size())
+                    .append(check.outgoing.size() == 1 ? " scheduled payment comes" : " scheduled payments come")
+                    .append(" out of this account:");
+            for (ScheduledPayment p : check.outgoing) {
+                message.append("\n   – ").append(p.getTitle()).append(", ").append(Ui.money(p.getAmount()))
+                        .append(p.isRecurring() ? " (" + p.getFrequencyText().toLowerCase(java.util.Locale.US) + ")" : "")
+                        .append(p.isFailed() ? " — failed" : "");
+            }
+        }
+        if (!check.incoming.isEmpty()) {
+            message.append("\n\n• ").append(check.incoming.size())
+                    .append(check.incoming.size() == 1 ? " scheduled transfer sends" : " scheduled transfers send")
+                    .append(" money into this account. ").append(check.incoming.size() == 1 ? "It" : "They")
+                    .append(" will be cancelled.");
+        }
+        if (check.linkedCard != null) {
+            message.append("\n\n• Your debit card •••• ").append(check.linkedCard.getLastFour())
+                    .append(" uses this account. ");
+            message.append(check.cardMovesTo != null
+                    ? "It will switch to your " + check.cardMovesTo.getDisplayName() + "."
+                    : "You have no other checking account, so the card will be cancelled.");
+        }
+        if (check.isLastAccount()) {
+            message.append("\n\n• This is your last open account.");
+        }
+        message.append("\n\nPast activity stays in your history.");
+
+        AlertDialog.Builder dialog = new AlertDialog.Builder(this)
+                .setTitle("Remove " + check.account.getDisplayName() + "?")
+                .setMessage(message.toString())
+                .setNegativeButton("Keep account", null);
+
+        if (!check.outgoing.isEmpty() && !check.otherAccounts.isEmpty()) {
+            // Payments can be moved to another account instead of being lost
+            dialog.setPositiveButton("Move payments & remove", (d, w) -> pickAccountForPayments(check));
+            dialog.setNeutralButton("Cancel payments & remove", (d, w) -> remove(null));
+        } else if (!check.outgoing.isEmpty()) {
+            dialog.setPositiveButton("Cancel payments & remove", (d, w) -> remove(null));
+        } else {
+            dialog.setPositiveButton("Remove account", (d, w) -> remove(null));
+        }
+        dialog.show();
+    }
+
+    private void pickAccountForPayments(AccountRemovalCheck check) {
+        List<String> labels = new ArrayList<>();
+        for (Account a : check.otherAccounts) labels.add(Ui.accountLabel(a));
+        new AlertDialog.Builder(this)
+                .setTitle("Move scheduled payments to…")
+                .setItems(labels.toArray(new String[0]), (d, which) ->
+                        remove(check.otherAccounts.get(which).getAccountNumber()))
+                .setNegativeButton("Back", null)
+                .show();
+    }
+
+    private void remove(String movePaymentsTo) {
         executorService.execute(() -> {
-            OperationResult result = databaseManager.closeAccount(userId, accountNumber);
+            OperationResult result = databaseManager.closeAccount(userId, accountNumber, movePaymentsTo);
             runOnUiThread(() -> {
-                Ui.toast(this, result.message);
-                if (result.success) finish();
+                if (isFinishing() || isDestroyed()) return;
+                if (result.success) {
+                    Ui.toast(this, result.message);
+                    finish();
+                } else {
+                    new AlertDialog.Builder(this)
+                            .setTitle("Account not removed")
+                            .setMessage(result.message)
+                            .setPositiveButton("OK", null)
+                            .show();
+                }
             });
         });
     }

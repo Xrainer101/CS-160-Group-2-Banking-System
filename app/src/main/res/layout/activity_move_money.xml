@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Deposit / Withdraw / Transfer screen. MoveMoneyActivity shows or hides parts for each mode. -->
+<!-- Deposit / Withdraw / Transfer screen. MoveMoneyActivity shows or hides parts for each mode.
+     Transfers can go to: my account, another customer here, or an account at another bank
+     (routing number + account number), now or on a date, once or on repeat. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/main"
     android:layout_width="match_parent"
@@ -62,7 +64,8 @@
                     <Spinner
                         android:id="@+id/spinnerFrom"
                         android:layout_width="match_parent"
-                        android:layout_height="48dp" />
+                        android:layout_height="48dp"
+                        android:contentDescription="Account" />
                 </FrameLayout>
 
                 <TextView
@@ -71,7 +74,7 @@
                     android:layout_marginTop="6dp"
                     android:layout_marginBottom="16dp" />
 
-                <!-- Transfer only: where the money goes -->
+                <!-- ===== Transfer only: where the money goes ===== -->
                 <LinearLayout
                     android:id="@+id/groupTransferTo"
                     android:layout_width="match_parent"
@@ -88,26 +91,32 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginBottom="8dp"
-                        android:orientation="horizontal">
+                        android:orientation="vertical">
 
                         <RadioButton
                             android:id="@+id/radioMyAccount"
-                            android:layout_width="0dp"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
                             android:checked="true"
                             android:text="My account"
                             android:textColor="@color/text_dark" />
 
                         <RadioButton
                             android:id="@+id/radioSomeoneElse"
-                            android:layout_width="0dp"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="Another customer"
+                            android:text="Another Team 2 Bank customer"
+                            android:textColor="@color/text_dark" />
+
+                        <RadioButton
+                            android:id="@+id/radioOtherBank"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="An account at another bank"
                             android:textColor="@color/text_dark" />
                     </RadioGroup>
 
+                    <!-- My account -->
                     <FrameLayout
                         android:id="@+id/frameToAccount"
                         style="@style/SpinnerBox"
@@ -116,16 +125,18 @@
                         <Spinner
                             android:id="@+id/spinnerTo"
                             android:layout_width="match_parent"
-                            android:layout_height="48dp" />
+                            android:layout_height="48dp"
+                            android:contentDescription="Account to send to" />
                     </FrameLayout>
 
                     <TextView
                         android:id="@+id/textNoOtherAccounts"
                         style="@style/HintText"
                         android:layout_marginBottom="16dp"
-                        android:text="You only have one account. Open another from the home screen, or send to another customer."
+                        android:text="You only have one account. Open another from the home screen, or send to someone else."
                         android:visibility="gone" />
 
+                    <!-- Another customer at this bank -->
                     <EditText
                         android:id="@+id/editRecipient"
                         style="@style/FieldInput"
@@ -141,6 +152,117 @@
                         style="@style/HintText"
                         android:layout_marginBottom="16dp"
                         android:visibility="gone" />
+
+                    <!-- Another bank -->
+                    <LinearLayout
+                        android:id="@+id/groupOtherBank"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            style="@style/FieldLabel"
+                            android:labelFor="@id/editExternalName"
+                            android:text="Name on their account" />
+
+                        <EditText
+                            android:id="@+id/editExternalName"
+                            style="@style/FieldInput"
+                            android:hint="e.g. Sam Smith"
+                            android:importantForAutofill="no"
+                            android:inputType="textPersonName|textCapWords"
+                            android:maxLength="60" />
+
+                        <TextView
+                            style="@style/FieldLabel"
+                            android:labelFor="@id/editRoutingNumber"
+                            android:text="Routing number" />
+
+                        <EditText
+                            android:id="@+id/editRoutingNumber"
+                            style="@style/FieldInput"
+                            android:layout_marginBottom="4dp"
+                            android:hint="9 digits"
+                            android:importantForAutofill="no"
+                            android:inputType="number"
+                            android:maxLength="9" />
+
+                        <TextView
+                            android:id="@+id/textRoutingCheck"
+                            style="@style/HintText"
+                            android:layout_marginBottom="16dp"
+                            android:text="The 9-digit number at the bottom left of their check, or in their banking app." />
+
+                        <TextView
+                            style="@style/FieldLabel"
+                            android:labelFor="@id/editExternalAccount"
+                            android:text="Account number" />
+
+                        <EditText
+                            android:id="@+id/editExternalAccount"
+                            style="@style/FieldInput"
+                            android:hint="4 to 17 digits"
+                            android:importantForAutofill="no"
+                            android:inputType="number"
+                            android:maxLength="17" />
+
+                        <TextView
+                            style="@style/FieldLabel"
+                            android:labelFor="@id/editExternalAccountConfirm"
+                            android:text="Re-enter account number" />
+
+                        <EditText
+                            android:id="@+id/editExternalAccountConfirm"
+                            style="@style/FieldInput"
+                            android:hint="Same number again"
+                            android:importantForAutofill="no"
+                            android:inputType="number"
+                            android:maxLength="17" />
+                    </LinearLayout>
+
+                    <!-- When -->
+                    <TextView
+                        style="@style/FieldLabel"
+                        android:text="When" />
+
+                    <RadioGroup
+                        android:id="@+id/radioWhen"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        android:orientation="horizontal">
+
+                        <RadioButton
+                            android:id="@+id/radioNow"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:checked="true"
+                            android:text="Now"
+                            android:textColor="@color/text_dark" />
+
+                        <RadioButton
+                            android:id="@+id/radioOnDate"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="On a date"
+                            android:textColor="@color/text_dark" />
+                    </RadioGroup>
+
+                    <!-- Tapping this opens a date picker -->
+                    <TextView
+                        android:id="@+id/textSendDate"
+                        style="@style/FieldInput"
+                        android:clickable="true"
+                        android:contentDescription="Send date"
+                        android:focusable="true"
+                        android:gravity="center_vertical"
+                        android:hint="Choose a date"
+                        android:visibility="gone" />
+
+                    <include layout="@layout/view_repeat_picker" />
                 </LinearLayout>
 
                 <TextView
@@ -172,9 +294,11 @@
                     android:id="@+id/textError"
                     style="@style/ErrorText" />
 
+                <!-- Text is changed to Deposit / Withdraw / Transfer / Schedule transfer by MoveMoneyActivity -->
                 <Button
                     android:id="@+id/buttonSubmit"
-                    style="@style/PrimaryButton" />
+                    style="@style/PrimaryButton"
+                    android:text="Continue" />
             </LinearLayout>
         </LinearLayout>
     </ScrollView>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Schedule a bill + list of upcoming bills (like "Schedule a bill" on the website's Transfers page) -->
+<!-- Schedule a bill, edit a scheduled bill or transfer, and see upcoming ones -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/main"
     android:layout_width="match_parent"
@@ -30,12 +30,15 @@
                 android:layout_marginTop="8dp"
                 android:text="BILL PAY" />
 
+            <!-- "Pay a bill", or "Edit payment" while editing -->
             <TextView
+                android:id="@+id/textFormTitle"
                 style="@style/SectionTitle"
                 android:text="Pay a bill"
                 android:textSize="24sp" />
 
             <TextView
+                android:id="@+id/textFormSubtitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
@@ -53,6 +56,7 @@
                 android:padding="22dp">
 
                 <TextView
+                    android:id="@+id/labelPayee"
                     style="@style/FieldLabel"
                     android:labelFor="@id/editPayee"
                     android:text="Pay to" />
@@ -88,10 +92,12 @@
                     <Spinner
                         android:id="@+id/spinnerFrom"
                         android:layout_width="match_parent"
-                        android:layout_height="48dp" />
+                        android:layout_height="48dp"
+                        android:contentDescription="Account to pay from" />
                 </FrameLayout>
 
                 <TextView
+                    android:id="@+id/labelDate"
                     style="@style/FieldLabel"
                     android:labelFor="@id/textDate"
                     android:text="Pay on" />
@@ -102,72 +108,10 @@
                     style="@style/FieldInput"
                     android:clickable="true"
                     android:focusable="true"
-                    android:gravity="center_vertical" />
-
-                <TextView
-                    style="@style/FieldLabel"
-                    android:text="Repeat" />
-
-                <FrameLayout style="@style/SpinnerBox">
-
-                    <Spinner
-                        android:id="@+id/spinnerRepeat"
-                        android:layout_width="match_parent"
-                        android:layout_height="48dp"
-                        android:contentDescription="How often to pay" />
-                </FrameLayout>
-
-                <!-- Shown when "Custom..." is chosen: Every [N] [days / weeks / months / years] -->
-                <LinearLayout
-                    android:id="@+id/groupCustomRepeat"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
                     android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:visibility="gone">
+                    android:hint="Choose a date" />
 
-                    <TextView
-                        android:id="@+id/labelRepeatEvery"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginEnd="10dp"
-                        android:labelFor="@id/editRepeatEvery"
-                        android:text="Every"
-                        android:textColor="@color/text_dark"
-                        android:textSize="15sp" />
-
-                    <EditText
-                        android:id="@+id/editRepeatEvery"
-                        style="@style/FieldInput"
-                        android:layout_width="72dp"
-                        android:layout_marginEnd="10dp"
-                        android:layout_marginBottom="0dp"
-                        android:gravity="center"
-                        android:hint="#"
-                        android:importantForAutofill="no"
-                        android:inputType="number"
-                        android:maxLength="3"
-                        android:text="2" />
-
-                    <FrameLayout
-                        style="@style/SpinnerBox"
-                        android:layout_width="0dp"
-                        android:layout_weight="1">
-
-                        <Spinner
-                            android:id="@+id/spinnerRepeatUnit"
-                            android:layout_width="match_parent"
-                            android:layout_height="48dp"
-                            android:contentDescription="Days, weeks, months or years" />
-                    </FrameLayout>
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/textRepeatHint"
-                    style="@style/HintText"
-                    android:layout_marginTop="4dp"
-                    android:layout_marginBottom="16dp" />
+                <include layout="@layout/view_repeat_picker" />
 
                 <TextView
                     android:id="@+id/textError"
@@ -177,9 +121,21 @@
                     android:id="@+id/buttonSchedule"
                     style="@style/PrimaryButton"
                     android:text="Schedule payment" />
+
+                <!-- Only while editing -->
+                <Button
+                    android:id="@+id/buttonCancelEdit"
+                    style="?attr/borderlessButtonStyle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Stop editing"
+                    android:textAllCaps="false"
+                    android:textColor="@color/link_blue"
+                    android:visibility="gone" />
             </LinearLayout>
 
-            <!-- Upcoming bills -->
+            <!-- Upcoming bills and scheduled transfers -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -194,13 +150,13 @@
 
                 <TextView
                     style="@style/SectionTitle"
-                    android:text="Upcoming payments" />
+                    android:text="Upcoming payments &amp; transfers" />
 
                 <TextView
                     style="@style/HintText"
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="8dp"
-                    android:text="Tap a payment to cancel it, or to stop a repeating one. Tap a failed payment to try it again." />
+                    android:text="Tap one to edit, stop or cancel it. Failed ones can be tried again." />
 
                 <LinearLayout
                     android:id="@+id/paymentsContainer"
@@ -211,7 +167,7 @@
                 <TextView
                     android:id="@+id/textNoPayments"
                     style="@style/EmptyStateText"
-                    android:text="No scheduled payments."
+                    android:text="Nothing scheduled."
                     android:visibility="gone" />
             </LinearLayout>
         </LinearLayout>

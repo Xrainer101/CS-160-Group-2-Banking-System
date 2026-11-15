@@ -1,5 +1,6 @@
 package com.example.onlinebanking_cs160;
 
+import android.app.DatePickerDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -21,6 +22,7 @@ import androidx.core.view.WindowInsetsCompat;
 import java.text.NumberFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.Locale;
 
@@ -130,6 +132,23 @@ public final class Ui {
         if (database.DatabaseManager.today().equals(dueDate)) return "Today";
         Date date = parseDueDate(dueDate);
         return date == null ? dueDate : new SimpleDateFormat("MMM d, yyyy", Locale.US).format(date);
+    }
+
+    /** Callback for pickDate: the chosen date as "yyyy-MM-dd". */
+    public interface DateChosen {
+        void onDate(String date);
+    }
+
+    /** Opens a date picker (no past dates) starting at currentDate ("yyyy-MM-dd"). */
+    public static void pickDate(Context context, String currentDate, DateChosen onChosen) {
+        Calendar current = Calendar.getInstance();
+        Date parsed = parseDueDate(currentDate);
+        if (parsed != null) current.setTime(parsed);
+        DatePickerDialog dialog = new DatePickerDialog(context, (view, year, month, day) ->
+                onChosen.onDate(String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, day)),
+                current.get(Calendar.YEAR), current.get(Calendar.MONTH), current.get(Calendar.DAY_OF_MONTH));
+        dialog.getDatePicker().setMinDate(System.currentTimeMillis() - 1000);
+        dialog.show();
     }
 
     /** "2026-11-15" -> "15th", "2026-11-01" -> "1st", "2026-11-22" -> "22nd". */
@@ -248,7 +267,7 @@ public final class Ui {
         ((TextView) row.findViewById(R.id.textPaymentDay)).setText(
                 due == null ? "" : new SimpleDateFormat("d", Locale.US).format(due));
 
-        ((TextView) row.findViewById(R.id.textPaymentPayee)).setText(p.getPayee());
+        ((TextView) row.findViewById(R.id.textPaymentPayee)).setText(p.getTitle());
 
         TextView meta = row.findViewById(R.id.textPaymentMeta);
         if (p.isFailed()) {
