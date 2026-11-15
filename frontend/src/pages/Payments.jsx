@@ -1,5 +1,10 @@
 import { useState } from 'react';
-export default function Payments({ schedulePayment }) {
+import { Repeat } from 'lucide-react';
+import { money } from '../data/mockData';
+
+export default function Payments({ payments = [], schedulePayment }) {
+  const totalScheduled = payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const largestBill = payments.reduce((largest, payment) => Math.max(largest, payment.amount), 0);
   const [payee, setPayee] = useState(''),
     [billAmount, setBillAmount] = useState(''),
     [billError, setBillError] = useState('');
@@ -24,6 +29,21 @@ export default function Payments({ schedulePayment }) {
         <span className="eyebrow">MOVE MONEY</span>
         <h1>Pay Bills</h1>
         <p>Practice scheduling demo bill payments.</p>
+      </div>
+      <div className="stats-grid">
+        <section className="panel">
+          <Repeat aria-hidden="true" />
+          <small>Scheduled Bills</small>
+          <h2>{payments.length}</h2>
+        </section>
+        <section className="panel">
+          <small>Total Scheduled</small>
+          <h2>{money(totalScheduled)}</h2>
+        </section>
+        <section className="panel">
+          <small>Largest Bill</small>
+          <h2>{money(largestBill)}</h2>
+        </section>
       </div>
         <section className="panel">
           <h2>Schedule a bill</h2>
@@ -58,6 +78,22 @@ export default function Payments({ schedulePayment }) {
             <button className="button button-primary">Schedule (demo)</button>
           </form>
         </section>
+      <section className="panel">
+        <h2>Your Bills</h2>
+        {payments.length === 0 ? (
+          <p className="empty">No bills scheduled yet.</p>
+        ) : (
+          payments.map(payment => (
+            <div className="summary-row" key={payment.id}>
+              <span>
+                <strong>{payment.name}</strong>
+                <small>{payment.date}</small>
+              </span>
+              <strong>{money(payment.amount)}</strong>
+            </div>
+          ))
+        )}
+      </section>
     </>
   );
 }
