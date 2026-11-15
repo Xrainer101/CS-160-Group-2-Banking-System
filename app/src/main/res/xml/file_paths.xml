@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Folders the camera may save check photos into (used by FileProvider in AndroidManifest.xml) -->
+<paths>
+    <cache-path
+        name="check_photos"
+        path="checks/" />
+</paths>
