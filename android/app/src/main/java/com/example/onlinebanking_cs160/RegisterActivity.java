@@ -147,7 +147,7 @@ public class RegisterActivity extends AppCompatActivity {
             try {
                 // Check the banking database before creating the Auth0 account or starting Duo enrollment
                 ApiClient.checkProfileAvailability(email, username, phoneNumber);
-                ApiClient.register(email, username, password);
+                ApiClient.register(email, username, password, phoneNumber);
             
                 runOnUiThread(() -> {
                     buttonRegister.setEnabled(true);
