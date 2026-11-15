@@ -13,7 +13,7 @@ export default function AccountsOverview({ accounts }) {
         </Link>
       </div>
       <div className="accounts-grid">
-        {!accounts ? (
+        {!accounts?.length ? (
           <p className="empty">No accounts found.</p>
         ) : (
           accounts.map((a) => (

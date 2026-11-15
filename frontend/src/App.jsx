@@ -35,6 +35,7 @@ import {
 import {
   getAccounts,
   getCurrentUser,
+  createAccount,
 } from "./api/bankingApi";
 
 import "./index.css";
@@ -112,11 +113,54 @@ function AppContent() {
   const [notice, setNotice] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [bankingLoading, setBankingLoading] =
-    useState(false);
+    useState(() => Boolean(session));
   const [bankingError, setBankingError] =
     useState("");
 
   const skipNextSessionLoadRef = useRef(false);
+  const sessionVersionRef = useRef(0);
+  const openingAccountRef = useRef(false);
+  const [openingAccount, setOpeningAccount] = useState(false);
+  const [accountRefreshError, setAccountRefreshError] = useState('');
+  const [refreshingAccounts, setRefreshingAccounts] = useState(false);
+
+  async function refreshAccounts(version = sessionVersionRef.current) {
+    if (version !== sessionVersionRef.current) return;
+    setRefreshingAccounts(true);
+    try {
+      const data = await getAccounts();
+      if (version !== sessionVersionRef.current) return;
+      setAccounts(data.accounts || []);
+      setTransactions(data.transactions || []);
+      setAccountRefreshError('');
+    } catch {
+      if (version === sessionVersionRef.current) {
+        setAccountRefreshError('Account created, but account data could not refresh. Retry refreshing below.');
+      }
+    } finally {
+      if (version === sessionVersionRef.current) setRefreshingAccounts(false);
+    }
+  }
+
+  async function openAccount(accountType) {
+    if (openingAccountRef.current) return false;
+    const version = sessionVersionRef.current;
+    openingAccountRef.current = true;
+    setOpeningAccount(true);
+    try {
+      await createAccount(accountType);
+      if (version !== sessionVersionRef.current) return false;
+      notify('Your new account was created with a $0.00 balance.');
+      await refreshAccounts(version);
+      return version === sessionVersionRef.current;
+    } catch (error) {
+      if (version === sessionVersionRef.current) throw error;
+      return false;
+    } finally {
+      openingAccountRef.current = false;
+      setOpeningAccount(false);
+    }
+  }
 
   const isAdmin = user?.role === "admin";
 
@@ -137,6 +181,8 @@ function AppContent() {
     }
 
     async function loadBankingData() {
+      setAccounts([]);
+      setTransactions([]);
       setBankingLoading(true);
       setBankingError("");
 
@@ -153,6 +199,8 @@ function AppContent() {
         );
       } catch (error) {
         if (!cancelled) {
+          setAccounts([]);
+          setTransactions([]);
           setBankingError(
             error.message ||
               "Unable to load banking data."
@@ -183,8 +231,13 @@ function AppContent() {
   async function handleAuthenticated(result) {
     if (!result?.session) return;
 
+    sessionVersionRef.current += 1;
+    setAccountRefreshError('');
+    setRefreshingAccounts(false);
     saveSession(result.session);
 
+    setAccounts([]);
+    setTransactions([]);
     setBankingError("");
     setBankingLoading(true);
 
@@ -215,6 +268,9 @@ function AppContent() {
   }
 
   function signOut() {
+    sessionVersionRef.current += 1;
+    setAccountRefreshError('');
+    setRefreshingAccounts(false);
     clearSession();
     setSession(null);
     setUser(null);
@@ -446,7 +502,16 @@ function AppContent() {
                       <Route
                         path="/accounts"
                         element={
-                          <Accounts {...shared} />
+                          <Accounts
+                            {...shared}
+                            bankingLoading={bankingLoading}
+                            bankingError={bankingError}
+                            onOpenAccount={openAccount}
+                            openingAccount={openingAccount}
+                            accountRefreshError={accountRefreshError}
+                            refreshingAccounts={refreshingAccounts}
+                            onRefreshAccounts={() => refreshAccounts()}
+                          />
                         }
                       />
 

@@ -15,6 +15,10 @@ Run the following commands in the terminal inside the corresponding folder (back
 
 `npm run dev`
 
+## Backend tests
+
+From `backend`, run `uv run python -m pytest tests`. This runs the tests named `test_*.py` added under `tests/`.
+
 ## Running the Backend for Authentication
 Run the following commands in the terminal from the project root to ensure auth0 in run with the backend.
 

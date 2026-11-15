@@ -3,14 +3,16 @@ const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 // Reads the auth0 access token and sends it as a Bearer token to the backend
 // Returns backend errors
-async function request(path) {
+async function request(path, options = {}) {
     const token = getAccessToken();
     if (!token) {
         throw new Error('No Auth0 access token is available.');
     }
 
     const response = await fetch(`${baseUrl}${path}`, {
+        ...options,
         headers: {
+            'Content-Type': 'application/json',
             Accept: 'application/json',
             Authorization: `Bearer ${token}`,
         },
@@ -27,6 +29,13 @@ async function request(path) {
 
 export function getCurrentUser() {
     return request('/api/auth/me');
+}
+
+export function createAccount(accountType) {
+    return request('/api/accounts', {
+        method: 'POST',
+        body: JSON.stringify({ account_type: accountType }),
+    });
 }
 
 export function getAccounts() {

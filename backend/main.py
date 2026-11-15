@@ -2,6 +2,7 @@
 import os
 import sqlite3
 import json
+from typing import Literal
 from urllib.request import Request, urlopen
 from datetime import datetime, timedelta, timezone
 import bcrypt   # For securely hashing passwords
@@ -288,8 +289,10 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         if not token_data.get(field) and token_data.get(namespaced_field):
             token_data[field] = token_data[namespaced_field]
 
+    user_dao = jpype.JClass("database.UserDAO")
+    linked_user = user_dao.getUserByAuth0Sub(token_data["sub"])
     profile_fields = ("email", "name", "given_name", "family_name", "username", "phone_number", "date_of_birth", "user_metadata")
-    if any(not token_data.get(field) for field in profile_fields):
+    if linked_user is None and any(not token_data.get(field) for field in profile_fields):
         userinfo = get_auth0_userinfo(credentials.credentials)
         if userinfo.get("sub") != token_data["sub"]:
             raise HTTPException(
@@ -509,6 +512,22 @@ def get_me(user=Depends(get_current_user)):
         "username": banking_user["username"],
         "is_new_user": banking_user.get("is_new_user", False)
     }
+
+class OpenAccountRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    account_type: Literal["checking", "savings"]
+
+
+@app.post("/api/accounts", status_code=201)
+def open_account(request: OpenAccountRequest, user=Depends(get_current_user)):
+    bank_account_dao = jpype.JClass("database.BankAccountDAO")
+    account_number = bank_account_dao.createBankAccount(
+        int(user["banking_user"]["user_id"]), request.account_type, 0.0
+    )
+    if account_number is None:
+        raise HTTPException(status_code=500, detail="Unable to create the bank account")
+    return {"message": "Account created successfully"}
+
 
 @app.get("/api/accounts")
 def get_accounts_data(user=Depends(get_current_user)):
