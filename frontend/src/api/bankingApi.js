@@ -38,6 +38,10 @@ export function createAccount(accountType) {
     });
 }
 
+export function getAccountDetail(accountId, signal) {
+    return request(`/api/accounts/${encodeURIComponent(accountId)}`, { signal });
+}
+
 export function getAccounts() {
     return request('/api/accounts');
 }

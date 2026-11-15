@@ -536,6 +536,22 @@ def get_accounts_data(user=Depends(get_current_user)):
     banking_username = user["banking_user"]["username"]
     java_accounts = bank_account_dao.getBankAccountsByUsername(banking_username)
 
+    return serialize_accounts(java_accounts)
+
+
+@app.get("/api/accounts/{account_id}")
+def get_account_detail(account_id: int, user=Depends(get_current_user)):
+    bank_account_dao = jpype.JClass("database.BankAccountDAO")
+    java_accounts = bank_account_dao.getBankAccountsByUsername(user["banking_user"]["username"])
+    account = next((account for account in java_accounts if int(account.getAccountId()) == account_id), None)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    data = serialize_accounts([account], include_details=True)
+    return {"account": data["accounts"][0], "transactions": data["transactions"]}
+
+
+def serialize_accounts(java_accounts, include_details=False):
+    transaction_dao = jpype.JClass("database.TransactionDAO")
     accounts = []
     transactions = []
     account_type_labels = {
@@ -566,6 +582,10 @@ def get_accounts_data(user=Depends(get_current_user)):
                 "status": str(account.getStatus()),
             }
         )
+
+        if include_details:
+            accounts[-1]["account_number"] = account_number
+            accounts[-1]["routing_number"] = str(account.getRoutingNumber())
 
         java_transactions = transaction_dao.getTransactionsByAccountNumber(account_number)
         for transaction in java_transactions:

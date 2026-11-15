@@ -16,6 +16,7 @@ import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
 import Dashboard from "./pages/Dashboard";
 import Accounts from "./pages/Accounts";
+import AccountDetail from "./pages/AccountDetail";
 import Transactions from "./pages/Transactions";
 import Transfers from "./pages/Transfers";
 import Cards from "./pages/Cards";
@@ -513,6 +514,11 @@ function AppContent() {
                             onRefreshAccounts={() => refreshAccounts()}
                           />
                         }
+                      />
+
+                      <Route
+                        path="/accounts/:accountId"
+                        element={<AccountDetail key={session?.access_token} />}
                       />
 
                       <Route

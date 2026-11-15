@@ -17,7 +17,7 @@ export default function AccountCard({ account }) {
           Available: {money(account.available)}
         </span>
       </div>
-      <Link to="/accounts" className="account-card-link">
+      <Link to={`/accounts/${account.id}`} className="account-card-link">
         View account <ArrowUpRight size={17} />
       </Link>
     </article>
