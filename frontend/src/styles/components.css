@@ -1,3 +1,19 @@
+.close-account-footer {
+  text-align: center;
+  margin: 32px 0;
+}
+.close-account-link {
+  border: 0;
+  background: transparent;
+  color: #bc3143;
+  padding: 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.button-danger {
+  background: #bc3143;
+  color: #fff;
+}
 .open-account-dialog {
   width: min(440px, calc(100% - 32px));
   max-height: calc(100vh - 32px);

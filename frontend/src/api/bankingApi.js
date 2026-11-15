@@ -22,7 +22,10 @@ async function request(path, options = {}) {
     if (!response.ok) {
         const message =
         typeof data.detail === 'string'? data.detail : 'The banking backend request failed.';
-        throw new Error(message);
+        const error = new Error(message);
+        error.status = response.status;
+        error.detail = data.detail;
+        throw error;
     }
     return data;
 }
@@ -36,6 +39,10 @@ export function createAccount(accountType) {
         method: 'POST',
         body: JSON.stringify({ account_type: accountType }),
     });
+}
+
+export function closeAccount(accountId) {
+    return request(`/api/accounts/${encodeURIComponent(accountId)}/close`, { method: 'POST' });
 }
 
 export function getAccountDetail(accountId, signal) {

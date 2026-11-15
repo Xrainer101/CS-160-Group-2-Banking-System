@@ -37,6 +37,7 @@ import {
   getAccounts,
   getCurrentUser,
   createAccount,
+  closeAccount,
 } from "./api/bankingApi";
 
 import "./index.css";
@@ -160,6 +161,22 @@ function AppContent() {
     } finally {
       openingAccountRef.current = false;
       setOpeningAccount(false);
+    }
+  }
+
+  async function handleCloseAccount(accountId) {
+    const version = sessionVersionRef.current;
+    try {
+      await closeAccount(accountId);
+      if (version !== sessionVersionRef.current) return false;
+      setAccounts(previous => previous.filter(account => String(account.id) !== String(accountId)));
+      setTransactions(previous => previous.filter(transaction => String(transaction.account) !== String(accountId)));
+      navigate('/accounts', { replace: true });
+      notify('Account closed successfully.');
+      return true;
+    } catch (error) {
+      if (version === sessionVersionRef.current) throw error;
+      return false;
     }
   }
 
@@ -518,7 +535,7 @@ function AppContent() {
 
                       <Route
                         path="/accounts/:accountId"
-                        element={<AccountDetail key={session?.access_token} />}
+                        element={<AccountDetail key={session?.access_token} onCloseAccount={handleCloseAccount} />}
                       />
 
                       <Route

@@ -4,16 +4,18 @@ import { Wallet } from 'lucide-react';
 import { getAccountDetail } from '../api/bankingApi';
 import { TransactionRows } from '../components/RecentTransactions';
 import { money } from '../data/mockData';
+import CloseAccountModal from '../components/CloseAccountModal';
 
-export default function AccountDetail() {
+export default function AccountDetail({ onCloseAccount }) {
   const { accountId } = useParams();
-  return <AccountDetailContent key={accountId} accountId={accountId} />;
+  return <AccountDetailContent key={accountId} accountId={accountId} onCloseAccount={onCloseAccount} />;
 }
 
-function AccountDetailContent({ accountId }) {
+function AccountDetailContent({ accountId, onCloseAccount }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [showNumber, setShowNumber] = useState(false);
+  const [showCloseModal, setShowCloseModal] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -75,6 +77,15 @@ function AccountDetailContent({ accountId }) {
             <h2>Latest activity</h2>
             <TransactionRows transactions={data.transactions} />
           </section>
+          <div className="close-account-footer">
+            <button type="button" className="close-account-link"
+              onClick={() => setShowCloseModal(true)}>Close this account</button>
+          </div>
+          {showCloseModal && (
+            <CloseAccountModal account={data.account}
+              onDismiss={() => setShowCloseModal(false)}
+              onConfirm={() => onCloseAccount(accountId)} />
+          )}
         </>
       )}
     </>

@@ -536,7 +536,7 @@ def get_accounts_data(user=Depends(get_current_user)):
     banking_username = user["banking_user"]["username"]
     java_accounts = bank_account_dao.getBankAccountsByUsername(banking_username)
 
-    return serialize_accounts(java_accounts)
+    return serialize_accounts([account for account in java_accounts if str(account.getStatus()) != "closed"])
 
 
 @app.get("/api/accounts/{account_id}")
@@ -544,10 +544,25 @@ def get_account_detail(account_id: int, user=Depends(get_current_user)):
     bank_account_dao = jpype.JClass("database.BankAccountDAO")
     java_accounts = bank_account_dao.getBankAccountsByUsername(user["banking_user"]["username"])
     account = next((account for account in java_accounts if int(account.getAccountId()) == account_id), None)
-    if account is None:
+    if account is None or str(account.getStatus()) == "closed":
         raise HTTPException(status_code=404, detail="Account not found")
     data = serialize_accounts([account], include_details=True)
     return {"account": data["accounts"][0], "transactions": data["transactions"]}
+
+
+@app.post("/api/accounts/{account_id}/close")
+def close_account(account_id: int, user=Depends(get_current_user)):
+    bank_account_dao = jpype.JClass("database.BankAccountDAO")
+    java_accounts = bank_account_dao.getBankAccountsByUsername(user["banking_user"]["username"])
+    account = next((account for account in java_accounts if int(account.getAccountId()) == account_id), None)
+    if account is None or str(account.getStatus()) == "closed":
+        raise HTTPException(status_code=404, detail="Account not found")
+    balance = float(account.getBalance())
+    if balance != 0:
+        raise HTTPException(status_code=409, detail={"message": "Move your money first", "balance": balance})
+    if not bank_account_dao.closeBankAccount(str(account.getAccountNumber())):
+        raise HTTPException(status_code=500, detail="Unable to close the account")
+    return {"message": "Account closed successfully"}
 
 
 def serialize_accounts(java_accounts, include_details=False):
