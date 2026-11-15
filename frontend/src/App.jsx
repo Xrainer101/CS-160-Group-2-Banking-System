@@ -19,6 +19,8 @@ import Accounts from "./pages/Accounts";
 import AccountDetail from "./pages/AccountDetail";
 import Transactions from "./pages/Transactions";
 import Transfers from "./pages/Transfers";
+import Payments from "./pages/Payments";
+import AccountMovement from "./pages/AccountMovement";
 import Cards from "./pages/Cards";
 import Settings from "./pages/Settings";
 import AdminPanel from "./pages/AdminPanel";
@@ -550,6 +552,19 @@ function AppContent() {
                         element={
                           <Transfers {...shared} />
                         }
+                      />
+
+                      <Route
+                        path="/payments"
+                        element={<Payments {...shared} />}
+                      />
+                      <Route
+                        path="/deposit"
+                        element={<AccountMovement key="deposit" kind="deposit" accounts={accounts} />}
+                      />
+                      <Route
+                        path="/withdraw"
+                        element={<AccountMovement key="withdraw" kind="withdraw" accounts={accounts} />}
                       />
 
                       <Route

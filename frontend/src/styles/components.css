@@ -214,3 +214,12 @@
     display: none;
   }
 }
+@media (width > 800px) {
+  .sidebar {
+    position: sticky;
+    top: 76px;
+    height: calc(100vh - 76px);
+    align-self: flex-start;
+    overflow-y: auto;
+  }
+}

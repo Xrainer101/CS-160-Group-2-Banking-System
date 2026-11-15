@@ -4,7 +4,10 @@ import {
   LayoutDashboard,
   Wallet,
   ArrowLeftRight,
-  ReceiptText,
+  DollarSign,
+  ArrowDown,
+  ArrowUp,
+  ListFilter,
   CreditCard,
   Settings,
   ShieldCheck,
@@ -18,8 +21,11 @@ import {
 const links = [
   ["/dashboard", "Overview", LayoutDashboard],
   ["/accounts", "My Accounts", Wallet],
-  ["/transactions", "Transactions", ReceiptText],
-  ["/transfers", "Transfers & Payments", ArrowLeftRight],
+  ["/transactions", "Transactions", ListFilter],
+  ["/transfers", "Transfers", ArrowLeftRight],
+  ["/payments", "Pay Bills", DollarSign],
+  ["/deposit", "Deposit", ArrowDown],
+  ["/withdraw", "Withdraw", ArrowUp],
   ["/cards", "My Cards", CreditCard],
 ];
 
