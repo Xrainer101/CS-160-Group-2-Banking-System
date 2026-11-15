@@ -15,35 +15,17 @@ Run the following commands in the terminal inside the corresponding folder (back
 
 `npm run dev`
 
+## Running the Backend for Authentication
+Run the following commands in the terminal from the project root to ensure auth0 in run with the backend.
 
+`.\.venv\Scripts\Activate.ps1`
 
-# Authentication Security Module
- 
-## Overview
- 
-- Password hashing using BCrypt
-- Password verification using BCrypt
-- Dedicated security package for authentication related functionality
+`$env:PYTHONPATH="$PWD\backend"`
 
-PasswordUtil.java 
-Password123 → generate random salt → password + salt → BCrypt hashing algorithm → hash output
+`$env:JAVA_HOME="C:\Users\ivana\AppData\Local\Programs\Eclipse Adoptium\jdk-17-runtime"`
 
-AuthenticationService.java
-Registration → call PasswordUtil → store hash → login → authenticate user with password
+`$env:AUTH0_DOMAIN="dev-fg7mzenn1walaym8.us.auth0.com"`
 
- 
-## Files Added
- 
-security/
-├── PasswordUtil.java
-├── AuthenticationService.java
-└── TwoFactorAuth.java
- 
-## Dependency Added
- 
-pom.xml
-<dependency>
-    <groupId>org.mindrot</groupId>
-    <artifactId>jbcrypt</artifactId>
-    <version>0.4</version>
-</dependency>
+`$env:AUTH0_AUDIENCE="https://team2bank-api"`
+
+`python -m uvicorn backend.main:app`
