@@ -1,26 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import OpenAccountModal from '../components/OpenAccountModal';
 import AccountsOverview from '../components/AccountsOverview';
 import { TransactionRows } from '../components/RecentTransactions';
 import { money } from '../data/mockData';
-import { fetchData } from '../api';
-export default function Accounts() {
-
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchData('/accounts')
-      .then(res => {
-        setData(res);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
-
-  if (loading) return <div>Loading data...</div>;
-  if (!data) return <div>Failed to load data.</div>;
-  const accounts = data.accounts
-  const transactions = data.transactions
+export default function Accounts({
+  accounts = [],
+  transactions = [],
+  bankingLoading = false,
+  bankingError = '',
+  onOpenAccount,
+  openingAccount = false,
+  accountRefreshError = '',
+  refreshingAccounts = false,
+  onRefreshAccounts,
+}) {
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  if (bankingLoading) return <div role="status">Loading your accounts...</div>;
+  if (bankingError) return <div role="alert">Unable to load accounts: {bankingError}</div>;
   return (
     <>
       <div className="page-heading">
@@ -28,11 +24,29 @@ export default function Accounts() {
         <h1>My accounts</h1>
         <p>Explore your balances and account activity.</p>
       </div>
+      <button className="button button-primary" type="button"
+        disabled={openingAccount || refreshingAccounts || Boolean(accountRefreshError)}
+        onClick={() => setShowAccountModal(true)}>
+        Open New Account
+      </button>
+      {showAccountModal && (
+        <OpenAccountModal onClose={() => setShowAccountModal(false)}
+          onCreate={onOpenAccount} submitting={openingAccount} />
+      )}
+      {accountRefreshError && (
+        <div role="alert">
+          <p>{accountRefreshError}</p>
+          <button type="button" disabled={refreshingAccounts}
+            onClick={onRefreshAccounts}>
+            {refreshingAccounts ? 'Refreshing...' : 'Refresh accounts'}
+          </button>
+        </div>
+      )}
       <AccountsOverview accounts={accounts} />
       <section className="panel">
         <h2>Account summary</h2>
         <div className="summary-list">
-          {!accounts ? (
+          {!accounts.length ? (
             <p className="empty">No accounts found.</p>
           ) : (
             accounts.map((a) => (

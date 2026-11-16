@@ -9,7 +9,7 @@ export default function UpcomingPayments({ payments }) {
           <span className="eyebrow">COMING UP</span>
           <h2>Upcoming payments</h2>
         </div>
-        <Link className="text-link" to="/transfers">
+        <Link className="text-link" to="/payments">
           Manage →
         </Link>
       </div>
@@ -27,7 +27,7 @@ export default function UpcomingPayments({ payments }) {
           </div>
         ))}
       </div>
-      <Link to="/transfers" className="button button-outline full">
+      <Link to="/payments" className="button button-outline full">
         Schedule a payment
       </Link>
     </section>

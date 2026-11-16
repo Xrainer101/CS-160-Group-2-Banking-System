@@ -1,15 +1,19 @@
 import { Link } from 'react-router-dom';
 import {
   ArrowLeftRight,
-  ReceiptText,
+  DollarSign,
+  ArrowDown,
+  ArrowUp,
   CreditCard,
   ListFilter,
 } from 'lucide-react';
 const actions = [
-  ['Transfer money', '/transfers', ArrowLeftRight],
-  ['Pay a bill', '/transfers', ReceiptText],
-  ['Manage cards', '/cards', CreditCard],
-  ['View activity', '/transactions', ListFilter],
+  ['Deposit', '/deposit', ArrowDown, 'Add money to account'],
+  ['Withdraw', '/withdraw', ArrowUp, 'take money out'],
+  ['Transfer money', '/transfers', ArrowLeftRight, 'Between accounts or people'],
+  ['Pay a bill', '/payments', DollarSign, 'Schedule a payment'],
+  ['Manage cards', '/cards', CreditCard, 'Freeze or replace'],
+  ['View activity', '/transactions', ListFilter, 'Search your history'],
 ];
 export default function QuickActions() {
   return (
@@ -21,12 +25,15 @@ export default function QuickActions() {
         </div>
       </div>
       <div className="quick-actions-grid">
-        {actions.map(([label, path, Icon]) => (
+        {actions.map(([label, path, Icon, description]) => (
           <Link className="quick-action-card" key={label} to={path}>
             <span className="quick-icon">
               <Icon size={22} />
             </span>
-            <strong>{label}</strong>
+            <div className="quick-action-text">
+              <strong>{label}</strong>
+              <small>{description}</small>
+            </div>
             <span className="quick-arrow">↗</span>
           </Link>
         ))}

@@ -1,7 +1,9 @@
 import { ArrowUpRight, Wallet } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { money } from '../data/mockData';
 export default function AccountCard({ account }) {
+  const { pathname } = useLocation();
+  const source = pathname === '/dashboard' ? '?from=overview' : '';
   return (
     <article className={'account-card ' + account.color}>
       <div className="account-card-top">
@@ -17,7 +19,7 @@ export default function AccountCard({ account }) {
           Available: {money(account.available)}
         </span>
       </div>
-      <Link to="/accounts" className="account-card-link">
+      <Link to={`/accounts/${account.id}${source}`} className="account-card-link">
         View account <ArrowUpRight size={17} />
       </Link>
     </article>

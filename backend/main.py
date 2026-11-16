@@ -4,6 +4,8 @@ import sqlite3
 import json
 import time
 import re
+from decimal import Decimal
+from typing import Literal
 from urllib.request import Request, urlopen
 from datetime import datetime, timedelta, timezone
 import bcrypt   # For securely hashing passwords
@@ -12,7 +14,7 @@ from jwt import PyJWKClient  # Gets Auth0's public keys for token validation
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware  # Backend and frontend communication
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer   # Bearer Token authentication
-from pydantic import BaseModel, EmailStr, Field # Validate request data
+from pydantic import BaseModel, EmailStr, Field, field_validator # Validate request data
 import jpype
 
 # Basic settings 
@@ -32,8 +34,8 @@ LOCKOUT_MINUTES = 15
 AUTH0_USERINFO_CACHE_TTL_SECONDS = 300
 _auth0_userinfo_cache = {}
 
-def normalize_phone_number(value):
-    return re.sub(r"\D", "", str(value))
+# def normalize_phone_number(value):
+#     return re.sub(r"\D", "", str(value))
 
 app = FastAPI(title="Online Banking API")   # Create FastAPI app
 
@@ -209,12 +211,13 @@ def link_auth0_user(token_data):
                 status_code=400,
                 detail="Auth0 profile is missing a phone number needed to create a banking profile"
             )
-        phone_number = normalize_phone_number(phone_value)
-        if len(phone_number) != 10:
-            raise HTTPException(
-                status_code=400,
-                detail="Phone number must contain 10 digits"
-            )
+        phone_number = str(phone_value).strip()  # Convert it to text and remove extra spaces.
+#         phone_number = normalize_phone_number(phone_value)
+#                 if len(phone_number) != 10:
+#                     raise HTTPException(
+#                         status_code=400,
+#                         detail="Phone number must contain 10 digits"
+#                     )
         date_of_birth = token_data.get("date_of_birth") or metadata.get("date_of_birth")
 
         # Check whether another banking profile already uses these values.
@@ -313,8 +316,10 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         if not token_data.get(field) and token_data.get(namespaced_field):
             token_data[field] = token_data[namespaced_field]
 
+    user_dao = jpype.JClass("database.UserDAO")
+    linked_user = user_dao.getUserByAuth0Sub(token_data["sub"])
     profile_fields = ("email", "name", "given_name", "family_name", "username", "phone_number", "date_of_birth", "user_metadata")
-    if any(not token_data.get(field) for field in profile_fields):
+    if linked_user is None and any(not token_data.get(field) for field in profile_fields):
         userinfo = get_auth0_userinfo(credentials.credentials)
         if userinfo.get("sub") != token_data["sub"]:
             raise HTTPException(
@@ -428,7 +433,7 @@ def get_manager_report_summary(user=Depends(require_manager_reports_permission))
     account_dao = jpype.JClass("database.BankAccountDAO")
     users = list(user_dao.getAllUsers())
     accounts = []
-    for banking_user in users: 
+    for banking_user in users:
         accounts.extend(
             account_dao.getBankAccountsByUserId(
                 int(banking_user.getUserId())
@@ -548,7 +553,7 @@ def check_profile_availability(request: ProfileAvailabilityRequest):
     conflict = user_dao.findAuth0ProfileConflict(
         request.username.strip().lower(),
         str(request.email).strip().lower(),
-        normalize_phone_number(request.phone_number),
+        request.phone_number.strip(), #normalize_phone_number(request.phone_number)
     )
     if conflict == "database":
         raise HTTPException(
@@ -743,6 +748,22 @@ def get_me(user=Depends(get_current_user)):
         "is_new_user": banking_user.get("is_new_user", False)
     }
 
+class OpenAccountRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    account_type: Literal["checking", "savings"]
+
+
+@app.post("/api/accounts", status_code=201)
+def open_account(request: OpenAccountRequest, user=Depends(get_current_user)):
+    bank_account_dao = jpype.JClass("database.BankAccountDAO")
+    account_number = bank_account_dao.createBankAccount(
+        int(user["banking_user"]["user_id"]), request.account_type, 0.0
+    )
+    if account_number is None:
+        raise HTTPException(status_code=500, detail="Unable to create the bank account")
+    return {"message": "Account created successfully"}
+
+
 @app.get("/api/accounts")
 def get_accounts_data(user=Depends(get_current_user)):
     bank_account_dao = jpype.JClass("database.BankAccountDAO")
@@ -750,6 +771,85 @@ def get_accounts_data(user=Depends(get_current_user)):
     banking_username = user["banking_user"]["username"]
     java_accounts = bank_account_dao.getBankAccountsByUsername(banking_username)
 
+    return serialize_accounts([account for account in java_accounts if str(account.getStatus()) != "closed"])
+
+
+@app.get("/api/accounts/{account_id}")
+def get_account_detail(account_id: int, user=Depends(get_current_user)):
+    bank_account_dao = jpype.JClass("database.BankAccountDAO")
+    java_accounts = bank_account_dao.getBankAccountsByUsername(user["banking_user"]["username"])
+    account = next((account for account in java_accounts if int(account.getAccountId()) == account_id), None)
+    if account is None or str(account.getStatus()) == "closed":
+        raise HTTPException(status_code=404, detail="Account not found")
+    data = serialize_accounts([account], include_details=True)
+    return {"account": data["accounts"][0], "transactions": data["transactions"]}
+
+
+@app.post("/api/accounts/{account_id}/close")
+def close_account(account_id: int, user=Depends(get_current_user)):
+    bank_account_dao = jpype.JClass("database.BankAccountDAO")
+    java_accounts = bank_account_dao.getBankAccountsByUsername(user["banking_user"]["username"])
+    account = next((account for account in java_accounts if int(account.getAccountId()) == account_id), None)
+    if account is None or str(account.getStatus()) == "closed":
+        raise HTTPException(status_code=404, detail="Account not found")
+    balance = float(account.getBalance())
+    if balance != 0:
+        raise HTTPException(status_code=409, detail={"message": "Move your money first", "balance": balance})
+    if not bank_account_dao.closeBankAccount(str(account.getAccountNumber())):
+        raise HTTPException(status_code=500, detail="Unable to close the account")
+    return {"message": "Account closed successfully"}
+
+
+class MovementRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    amount: Decimal
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def validate_amount(cls, value):
+        text = str(value).strip()
+        if not re.fullmatch(r"-?\d+(?:\.\d{1,2})?", text):
+            raise HTTPException(status_code=422, detail={"field": "amount", "message": "Enter an amount like 25 or 25.50"})
+        amount = Decimal(text)
+        if amount <= 0:
+            raise HTTPException(status_code=422, detail={"field": "amount", "message": "Enter an amount greater than $0.00"})
+        if not __import__("math").isfinite(float(amount)):
+            raise HTTPException(status_code=422, detail={"field": "amount", "message": "Enter an amount like 25 or 25.50"})
+        return amount
+
+
+@app.post("/api/accounts/{account_id}/deposit")
+def deposit_to_account(account_id: int, request: MovementRequest, user=Depends(get_current_user)):
+    return move_account_money(account_id, request, user, "deposit")
+
+
+@app.post("/api/accounts/{account_id}/withdraw")
+def withdraw_from_account(account_id: int, request: MovementRequest, user=Depends(get_current_user)):
+    return move_account_money(account_id, request, user, "withdraw")
+
+
+def move_account_money(account_id, request, user, operation):
+    bank_dao = jpype.JClass("database.BankAccountDAO")
+    accounts = bank_dao.getBankAccountsByUsername(user["banking_user"]["username"])
+    account = next((a for a in accounts if int(a.getAccountId()) == account_id), None)
+    if account is None or str(account.getStatus()) == "closed":
+        raise HTTPException(status_code=404, detail="Account not found")
+    if str(account.getStatus()) != "active":
+        raise HTTPException(status_code=409, detail="This account is not active")
+    balance = float(account.getBalance())
+    if operation == "withdraw" and request.amount > Decimal(str(balance)):
+        raise HTTPException(status_code=409, detail={
+            "field": "amount", "message": f"That's more than the ${balance:,.2f} available",
+            "available": balance,
+        })
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    if not getattr(transaction_dao, operation)(str(account.getAccountNumber()), float(request.amount)):
+        raise HTTPException(status_code=409, detail="Unable to complete the transaction. Refresh your accounts and try again.")
+    return {"message": "Transaction completed"}
+
+
+def serialize_accounts(java_accounts, include_details=False):
+    transaction_dao = jpype.JClass("database.TransactionDAO")
     accounts = []
     transactions = []
     account_type_labels = {
@@ -780,6 +880,10 @@ def get_accounts_data(user=Depends(get_current_user)):
                 "status": str(account.getStatus()),
             }
         )
+
+        if include_details:
+            accounts[-1]["account_number"] = account_number
+            accounts[-1]["routing_number"] = str(account.getRoutingNumber())
 
         java_transactions = transaction_dao.getTransactionsByAccountNumber(account_number)
         for transaction in java_transactions:

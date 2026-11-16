@@ -22,7 +22,7 @@ const icons = {
 export function TransactionRows({ transactions }) {
   return (
     <div className="transaction-list">
-      {!transactions ? (
+      {!transactions?.length ? (
         <p className="empty">No transactions found.</p>
       ) : (
         transactions.map((t) => {

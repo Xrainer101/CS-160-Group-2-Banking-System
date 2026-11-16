@@ -1,3 +1,41 @@
+.stacked-form input[aria-invalid="true"] {
+  border-color: #bc3143;
+  outline-color: #bc3143;
+}
+.close-account-footer {
+  text-align: center;
+  margin: 32px 0;
+}
+.close-account-link {
+  border: 0;
+  background: transparent;
+  color: #bc3143;
+  padding: 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.button-danger {
+  background: #bc3143;
+  color: #fff;
+}
+.open-account-dialog {
+  width: min(440px, calc(100% - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border: 0;
+  border-radius: 16px;
+  padding: 28px;
+  color: #30435e;
+}
+.open-account-dialog::backdrop {
+  background: #0c234680;
+}
+.open-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
 .topbar {
   height: 76px;
   background: #fff;
@@ -178,5 +216,14 @@
   }
   .topbar-brand small {
     display: none;
+  }
+}
+@media (width > 800px) {
+  .sidebar {
+    position: sticky;
+    top: 76px;
+    height: calc(100vh - 76px);
+    align-self: flex-start;
+    overflow-y: auto;
   }
 }

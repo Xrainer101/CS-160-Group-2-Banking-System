@@ -2,18 +2,20 @@
 Software Engineering class project
 
 ## Running the Frontend and Backend for dev
-Run the following commands in the terminal inside the corresponding folder (backend or frontend). The first line for each should only be needed once to install the dependencies. You may need to download uv and npm first if you don't have them
+Run the following commands in the terminal inside the corresponding folder (backend or frontend). You may need to download uv and npm first if you don't have them
 
 **backend**
 
-`uv add "fastapi[standard]"`
-
-`uv run fastapi dev main.py`
+`uv run uvicorn main:app --reload --port 8000`
 
 **frontend**   
 `npm install`
 
 `npm run dev`
+
+## Backend tests
+
+From `backend`, run `uv run python -m pytest tests`. This runs the tests named `test_*.py` added under `tests/`.
 
 ## Running the Backend for Authentication
 Run the following commands in the terminal from the project root to ensure auth0 in run with the backend.

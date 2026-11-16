@@ -232,7 +232,8 @@ public final class ApiClient {
     public static void register(
         String email,
         String username,
-        String password
+        String password,
+        String phoneNumber
     ) throws Exception {
         URL url = new URL("https://" + AUTH0_DOMAIN + "/dbconnections/signup");
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
@@ -247,6 +248,10 @@ public final class ApiClient {
         requestBody.put("email",email);
         requestBody.put("username",username);
         requestBody.put("password",password);
+
+        JSONObject metadata = new JSONObject();
+        metadata.put("phone_number", phoneNumber);
+        requestBody.put("user_metadata", metadata);
 
         try (OutputStream outputStream = connection.getOutputStream()) {
             outputStream.write(requestBody.toString().getBytes(StandardCharsets.UTF_8));

@@ -17,8 +17,11 @@ import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
 import Dashboard from "./pages/Dashboard";
 import Accounts from "./pages/Accounts";
+import AccountDetail from "./pages/AccountDetail";
 import Transactions from "./pages/Transactions";
 import Transfers from "./pages/Transfers";
+import Payments from "./pages/Payments";
+import AccountMovement from "./pages/AccountMovement";
 import Cards from "./pages/Cards";
 import Settings from "./pages/Settings";
 import AdminPanel from "./pages/AdminPanel";
@@ -36,6 +39,9 @@ import {
 import {
   getAccounts,
   getCurrentUser,
+  createAccount,
+  closeAccount,
+  moveAccountMoney,
 } from "./api/bankingApi";
 
 import { getManagerPermission } from "./api/adminApi";
@@ -116,7 +122,7 @@ function AppContent() {
   const [notice, setNotice] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [bankingLoading, setBankingLoading] =
-    useState(false);
+    useState(() => Boolean(session));
   const [bankingError, setBankingError] =
     useState("");
   const [canViewManagerReports, setCanViewManagerReports] =
@@ -127,6 +133,93 @@ function AppContent() {
     location.pathname === "/admin";
 
   const skipNextSessionLoadRef = useRef(false);
+  const sessionVersionRef = useRef(0);
+  const openingAccountRef = useRef(false);
+  const [openingAccount, setOpeningAccount] = useState(false);
+  const [accountRefreshError, setAccountRefreshError] = useState('');
+  const [refreshingAccounts, setRefreshingAccounts] = useState(false);
+
+  async function refreshAccounts(version = sessionVersionRef.current) {
+    if (version !== sessionVersionRef.current) return;
+    setRefreshingAccounts(true);
+    try {
+      const data = await getAccounts();
+      if (version !== sessionVersionRef.current) return;
+      setAccounts(data.accounts || []);
+      setTransactions(data.transactions || []);
+      setAccountRefreshError('');
+    } catch {
+      if (version === sessionVersionRef.current) {
+        setAccountRefreshError('Account created, but account data could not refresh. Retry refreshing below.');
+      }
+    } finally {
+      if (version === sessionVersionRef.current) setRefreshingAccounts(false);
+    }
+  }
+
+  async function openAccount(accountType) {
+    if (openingAccountRef.current) return false;
+    const version = sessionVersionRef.current;
+    openingAccountRef.current = true;
+    setOpeningAccount(true);
+    try {
+      await createAccount(accountType);
+      if (version !== sessionVersionRef.current) return false;
+      notify('Your new account was created with a $0.00 balance.');
+      await refreshAccounts(version);
+      return version === sessionVersionRef.current;
+    } catch (error) {
+      if (version === sessionVersionRef.current) throw error;
+      return false;
+    } finally {
+      openingAccountRef.current = false;
+      setOpeningAccount(false);
+    }
+  }
+
+  async function handleCloseAccount(accountId) {
+    const version = sessionVersionRef.current;
+    try {
+      await closeAccount(accountId);
+      if (version !== sessionVersionRef.current) return false;
+      setAccounts(previous => previous.filter(account => String(account.id) !== String(accountId)));
+      setTransactions(previous => previous.filter(transaction => String(transaction.account) !== String(accountId)));
+      navigate('/accounts', { replace: true });
+      notify('Account closed successfully.');
+      return true;
+    } catch (error) {
+      if (version === sessionVersionRef.current) throw error;
+      return false;
+    }
+  }
+
+  async function refreshMovement(version) {
+    const data = await getAccounts();
+    if (version !== sessionVersionRef.current) return null;
+    setAccounts(data.accounts || []);
+    setTransactions(data.transactions || []);
+    return data.accounts || [];
+  }
+
+  async function handleMovement(accountId, kind, amount) {
+    const version = sessionVersionRef.current;
+    try {
+      await moveAccountMoney(accountId, kind, amount);
+    } catch (error) {
+      if (version === sessionVersionRef.current) throw error;
+      return null;
+    }
+    if (version !== sessionVersionRef.current) return null;
+    const refresh = async () => {
+      const accounts = await refreshMovement(version);
+      return accounts?.find(account => String(account.id) === String(accountId)) || null;
+    };
+    try {
+      return { account: await refresh(), refresh };
+    } catch {
+      return { account: null, refresh };
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -146,6 +239,8 @@ function AppContent() {
     }
 
     async function loadBankingData() {
+      setAccounts([]);
+      setTransactions([]);
       setBankingLoading(true);
       setBankingError("");
 
@@ -166,6 +261,8 @@ function AppContent() {
         );
       } catch (error) {
         if (!cancelled) {
+          setAccounts([]);
+          setTransactions([]);
           setBankingError(
             error.message ||
               "Unable to load banking data."
@@ -196,8 +293,13 @@ function AppContent() {
   async function handleAuthenticated(result) {
     if (!result?.session) return;
 
+    sessionVersionRef.current += 1;
+    setAccountRefreshError('');
+    setRefreshingAccounts(false);
     saveSession(result.session);
 
+    setAccounts([]);
+    setTransactions([]);
     setBankingError("");
     setBankingLoading(true);
 
@@ -236,6 +338,9 @@ function AppContent() {
   }
 
   function signOut() {
+    sessionVersionRef.current += 1;
+    setAccountRefreshError('');
+    setRefreshingAccounts(false);
     clearSession();
     setSession(null);
     setUser(null);
@@ -481,8 +586,22 @@ function AppContent() {
                       <Route
                         path="/accounts"
                         element={
-                          <Accounts {...shared} />
+                          <Accounts
+                            {...shared}
+                            bankingLoading={bankingLoading}
+                            bankingError={bankingError}
+                            onOpenAccount={openAccount}
+                            openingAccount={openingAccount}
+                            accountRefreshError={accountRefreshError}
+                            refreshingAccounts={refreshingAccounts}
+                            onRefreshAccounts={() => refreshAccounts()}
+                          />
                         }
+                      />
+
+                      <Route
+                        path="/accounts/:accountId"
+                        element={<AccountDetail key={session?.access_token} onCloseAccount={handleCloseAccount} />}
                       />
 
                       <Route
@@ -497,6 +616,19 @@ function AppContent() {
                         element={
                           <Transfers {...shared} />
                         }
+                      />
+
+                      <Route
+                        path="/payments"
+                        element={<Payments {...shared} />}
+                      />
+                      <Route
+                        path="/deposit"
+                        element={<AccountMovement key={session?.access_token + ":deposit"} kind="deposit" accounts={accounts} onMove={handleMovement} />}
+                      />
+                      <Route
+                        path="/withdraw"
+                        element={<AccountMovement key={session?.access_token + ":withdraw"} kind="withdraw" accounts={accounts} onMove={handleMovement} />}
                       />
 
                       <Route

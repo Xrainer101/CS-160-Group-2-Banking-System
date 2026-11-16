@@ -1,64 +1,60 @@
 import { useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { money } from '../data/mockData';
-export default function Transfers({ accounts, transfer, schedulePayment }) {
-  const [from, setFrom] = useState('checking'),
-    [to, setTo] = useState('savings'),
+export default function Transfers(props) {
+  const [params] = useSearchParams();
+  const initialAccountId = params.get('accountId') || '';
+  const returnTo = initialAccountId
+    ? `/accounts/${encodeURIComponent(initialAccountId)}${params.get('from') === 'overview' ? '?from=overview' : ''}` : null;
+  return <TransferForm key={initialAccountId} {...props} initialAccountId={initialAccountId} returnTo={returnTo} />;
+}
+
+function TransferForm({ accounts = [], transfer, initialAccountId, returnTo }) {
+  const [from, setFrom] = useState(initialAccountId),
+    [to, setTo] = useState(''),
     [amount, setAmount] = useState(''),
     [error, setError] = useState('');
-  const [payee, setPayee] = useState(''),
-    [billAmount, setBillAmount] = useState(''),
-    [billError, setBillError] = useState('');
+  const fromId = accounts.some(account => String(account.id) === from)
+    ? from : String(accounts[0]?.id ?? '');
+  const toId = accounts.some(account => String(account.id) === to)
+    ? to : String((accounts.find(account => String(account.id) !== fromId) || accounts[0])?.id ?? '');
   function submit(e) {
     e.preventDefault();
-    const result = transfer(from, to, Number(amount));
+    const result = transfer(fromId, toId, Number(amount));
     setError(result);
     if (!result) setAmount('');
-  }
-  function bill(e) {
-    e.preventDefault();
-    if (
-      !payee.trim() ||
-      !Number.isFinite(Number(billAmount)) ||
-      Number(billAmount) <= 0
-    ) {
-      setBillError('Enter a payee and a valid amount.');
-      return;
-    }
-    schedulePayment(payee.trim(), Number(billAmount));
-    setBillError('');
-    setPayee('');
-    setBillAmount('');
   }
   return (
     <>
       <div className="page-heading">
+        {returnTo && <Link className="text-link" to={returnTo}>← Back to account details</Link>}
         <span className="eyebrow">MOVE MONEY</span>
-        <h1>Transfers & payments</h1>
+        <h1>Transfers</h1>
         <p>Practice moving money between demo accounts.</p>
       </div>
-      <div className="two-column">
         <section className="panel">
           <h2>Transfer between accounts</h2>
           <p className="panel-subtitle">
             Changes appear instantly in this demo only.
           </p>
+          {accounts.length < 2 && <p className="empty">You need two accounts to transfer money.</p>}
           <form className="stacked-form" onSubmit={submit}>
             <label>
               From account
-              <select value={from} onChange={(e) => setFrom(e.target.value)}>
+              <select value={fromId} disabled={!accounts.length} onChange={(e) => setFrom(e.target.value)}>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
-                    {a.type} — {money(a.available)} available
+                    {a.type} {a.number} — {money(a.available)} available
                   </option>
                 ))}
               </select>
             </label>
             <label>
               To account
-              <select value={to} onChange={(e) => setTo(e.target.value)}>
+              <select value={toId} disabled={!accounts.length} onChange={(e) => setTo(e.target.value)}>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
-                    {a.type}
+                    {a.type} {a.number}
                   </option>
                 ))}
               </select>
@@ -80,43 +76,9 @@ export default function Transfers({ accounts, transfer, schedulePayment }) {
                 {error}
               </p>
             )}
-            <button className="button button-primary">Transfer (demo)</button>
+            <button className="button button-primary" disabled={accounts.length < 2}>Transfer (demo)</button>
           </form>
         </section>
-        <section className="panel">
-          <h2>Schedule a bill</h2>
-          <p className="panel-subtitle">Adds a simulated upcoming payment.</p>
-          <form className="stacked-form" onSubmit={bill}>
-            <label>
-              Payee name
-              <input
-                value={payee}
-                onChange={(e) => setPayee(e.target.value)}
-                required
-                placeholder="e.g. Internet provider"
-              />
-            </label>
-            <label>
-              Amount (USD)
-              <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                required
-                value={billAmount}
-                onChange={(e) => setBillAmount(e.target.value)}
-                placeholder="0.00"
-              />
-            </label>
-            {billError && (
-              <p className="form-error" role="alert">
-                {billError}
-              </p>
-            )}
-            <button className="button button-primary">Schedule (demo)</button>
-          </form>
-        </section>
-      </div>
     </>
   );
 }
