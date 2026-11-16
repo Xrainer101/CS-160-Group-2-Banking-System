@@ -5,6 +5,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 
 public class DatabaseManager {
     // This will create a file named "bank.db" in your project root directory
@@ -65,7 +66,7 @@ public class DatabaseManager {
                 "related_account TEXT DEFAULT NULL," +
                 "status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('pending', 'completed', 'failed', 'cancelled'))," +
                 "scheduled_for DATETIME DEFAULT CURRENT_TIMESTAMP," +
-                "timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
                 "FOREIGN KEY (account_number) REFERENCES bank_accounts(account_number) ON DELETE CASCADE);";
             stmt.execute(createTransactionsTable);
 
@@ -121,51 +122,116 @@ public class DatabaseManager {
     public static void main(String[] args) {
         initializeDatabase();
         
-        // Test inserting a user
+        // Test inserting users
+        System.out.println("=== SETUP: Creating Sender & Recipient ===");
         UserDAO.registerUser("john_doe", "John", "Doe", "john@example.com", "1234567890", "fake_hashed_password_123");
+        UserDAO.registerUser("bob_recipient", "Bob", "Jones", "bob@example.com", "4445556666", "hash_bob");
         
+        System.out.println();
+
         // Test querying the user back
+        System.out.println("=== TEST: Getting user and ids ===");
         UserDAO.getUserByUsername("john_doe");
 
-        int userID = UserDAO.getUserIdByUsername("john_doe");
+        int johnId = UserDAO.getUserIdByUsername("john_doe");
+        int bobId = UserDAO.getUserIdByUsername("bob_recipient");
 
         System.out.println();
 
-        // Example: Create a Checking account with a $250.00 initial deposit for User ID 1
-        String testNum1 = BankAccountDAO.createBankAccount(userID, "checking", 250.00);
+        // Example: Create a Checking account with a $250.00 initial deposit
+        System.out.println("=== TEST: Creating and getting bank accounts ===");
+        String johnCheckAcc = BankAccountDAO.createBankAccount(johnId, "checking", 250.00);
 
-        // Example: Create a Savings account for the same user (User ID 1)
-        String testNum2 = BankAccountDAO.createBankAccount(userID, "savings", 1000.00);
+        // Example: Create a Savings account for the same user
+        String johnSaveAcc = BankAccountDAO.createBankAccount(johnId, "savings", 1000.00);
+        String bobAcc = BankAccountDAO.createBankAccount(bobId, "savings", 500.00);
 
         BankAccountDAO.getBankAccountsByUsername("john_doe");
 
         System.out.println();
 
+        System.out.println("=== TEST: Deposit and withdrawal ===");
         // Test deposit
-        TransactionDAO.deposit(testNum1, 50);
+        TransactionDAO.deposit(johnCheckAcc, 50);
 
         // Test withdraw
-        TransactionDAO.withdraw(testNum1, 25);
+        TransactionDAO.withdraw(johnCheckAcc, 25);
 
-        // Test transfer
-        TransactionDAO.transfer(testNum1, testNum2, 100);
+        // Test instant transfer
+        System.out.println("=== TEST: Instant transfer ===");
+        TransactionDAO.transfer(johnCheckAcc, johnSaveAcc, 100);
 
         BankAccountDAO.getBankAccountsByUsername("john_doe");
 
-        TransactionDAO.getTransactionsByAccountNumber(testNum1);
+        TransactionDAO.getTransactionsByAccountNumber(johnCheckAcc);
 
         System.out.println();
 
-        // Test close
-        if (testNum1 != null) {
-            BankAccountDAO.closeBankAccount(testNum1);
+        System.out.println("=== TEST: Creating Two Future Transfers ===");
+        // Schedule Transfer #1 ($250) and Transfer #2 ($75)
+        TransactionDAO.transfer(johnCheckAcc, bobAcc, 250.00, "2026-12-15 09:00:00");
+        TransactionDAO.transfer(johnCheckAcc, bobAcc, 75.00, "2026-12-25 10:00:00");
+
+        // Verify balances have NOT changed yet
+        double johnBalance = BankAccountDAO.getBankAccountsByUsername("john_doe").get(0).getBalance();
+        double bobBalance = BankAccountDAO.getBankAccountsByUsername("bob_recipient").get(0).getBalance();
+        System.out.println("John balance (expected $1000.00): $" + String.format("%.2f", johnBalance));
+        System.out.println("Bob balance   (expected $500.00):  $" + String.format("%.2f", bobBalance));
+
+        System.out.println();
+
+        // Modify scheduled transfer
+        System.out.println("=== TEST: Modifying Scheduled Transfer #1 ===");
+        List<Transaction> johnPending = TransactionDAO.getPendingTransactionsByAccountNumber(johnCheckAcc);
+        Transaction firstTx = johnPending.get(0); // The $250.00 transfer
+        System.out.println("Before Edit -> ID: " + firstTx.getTransactionId() +
+                           " | Amount: $" + firstTx.getAmount() +
+                           " | Date: " + firstTx.getScheduledFor());
+
+        // Update amount to $300.00 and push date to Dec 20
+        boolean editSuccess = TransactionDAO.editScheduledTransaction(
+            firstTx.getTransactionId(), 300.00, "2026-12-20 14:30:00"
+        );
+        System.out.println("Edit returned: " + editSuccess);
+
+        // Verify BOTH Alice's and Bob's pending records updated
+        Transaction johnUpdated = TransactionDAO.getPendingTransactionsByAccountNumber(johnCheckAcc).get(0);
+        Transaction bobUpdated = TransactionDAO.getPendingTransactionsByAccountNumber(bobAcc).get(0);
+        System.out.println("John After Edit -> $" + johnUpdated.getAmount() + " on " + johnUpdated.getScheduledFor());
+        System.out.println("Bob After Edit   -> $" + bobUpdated.getAmount() + " on " + bobUpdated.getScheduledFor());
+
+        System.out.println("\n=== GUARDRAIL CHECK: Recipient Tries to Edit ===");
+        boolean illegalEdit = TransactionDAO.editScheduledTransaction(bobUpdated.getTransactionId(), 9999.00, null);
+        System.out.println("Recipient edit blocked (expected false): " + illegalEdit);
+
+        System.out.println("\n=== TEST: Cancelling Scheduled Transfer #2 ===");
+        Transaction secondTx = johnPending.get(1); // The $75.00 transfer
+        boolean cancelSuccess = TransactionDAO.cancelScheduledTransaction(secondTx.getTransactionId());
+        System.out.println("Cancel returned: " + cancelSuccess);
+        System.out.println("John remaining pending count (expected 1): " +
+                           TransactionDAO.getPendingTransactionsByAccountNumber(johnCheckAcc).size());
+
+        // Print full ledger to verify the cancelled row is still preserved with status = 'cancelled'
+        System.out.println("\n=== FULL LEDGER AUDIT (JOHN) ===");
+        for (Transaction tx : TransactionDAO.getTransactionsByAccountNumber(johnCheckAcc)) {
+            System.out.printf("ID: %d | Type: %-12s | Amount: $%-7.2f | Status: %-10s | Scheduled: %s%n",
+                tx.getTransactionId(), tx.getTransactionType(), tx.getAmount(), tx.getStatus(), tx.getScheduledFor());
+        }
+        TransactionDAO.getTransactionsByAccountNumber(johnCheckAcc);
+        TransactionDAO.getTransactionsByAccountNumber(bobAcc);
+
+        System.out.println("=== TEST: Close/deletion tests ===");
+        // Test close        
+        if (johnCheckAcc != null) {
+            BankAccountDAO.closeBankAccount(johnCheckAcc);
         }
 
         // Test deleting a single bank account
-        BankAccountDAO.deleteBankAccount(testNum1);
+        BankAccountDAO.deleteBankAccount(johnCheckAcc);
 
         // Test deleting a user (and cascading to their remaining accounts)
         UserDAO.deleteUser("john_doe");
+        UserDAO.deleteUser("bob_recipient");
 
         // Test finding again
         BankAccountDAO.getBankAccountsByUsername("john_doe");

@@ -189,6 +189,192 @@ public class TransactionDAO {
 
     // Scheduled transfers
 
+    // -- EDITORS --
+    /**
+     * Edits the amount and/or scheduled date of a pending payment.
+     * Pass null for newScheduledFor if you only want to update the amount.
+     */
+    public static boolean editScheduledTransaction(int transactionId, double newAmount, String newScheduledFor) {
+        if (newAmount <= 0) {
+            System.out.println("Edit failed: Amount must be greater than zero.");
+            return false;
+        }
+
+        String selectSql = "SELECT account_number, transaction_type, amount, related_account, status, scheduled_for " +
+                           "FROM transactions WHERE transaction_id = ?";
+        String updateSql = "UPDATE transactions SET amount = ?, scheduled_for = ? " +
+                           "WHERE transaction_id = ? AND status = 'pending'";
+
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                String accountNumber;
+                String type;
+                double oldAmount;
+                String relatedAccount;
+                String status;
+                String oldScheduledFor;
+
+                // 1. Fetch and validate the existing transaction
+                try (PreparedStatement selectStmt = conn.prepareStatement(selectSql)) {
+                    selectStmt.setInt(1, transactionId);
+                    try (ResultSet rs = selectStmt.executeQuery()) {
+                        if (!rs.next()) {
+                            throw new SQLException("Transaction ID " + transactionId + " not found.");
+                        }
+                        accountNumber = rs.getString("account_number");
+                        type = rs.getString("transaction_type");
+                        oldAmount = rs.getDouble("amount");
+                        relatedAccount = rs.getString("related_account");
+                        status = rs.getString("status");
+                        oldScheduledFor = rs.getString("scheduled_for");
+                    }
+                }
+
+                if (!"pending".equals(status)) {
+                    throw new SQLException("Only pending transactions can be edited (current status: " + status + ").");
+                }
+                if ("transfer_in".equals(type)) {
+                    throw new SQLException("Recipients cannot edit an incoming scheduled transfer.");
+                }
+
+                String finalScheduledFor = (newScheduledFor != null && !newScheduledFor.isEmpty())
+                                           ? newScheduledFor
+                                           : oldScheduledFor;
+
+                // 2. Update the primary transaction
+                try (PreparedStatement updateStmt = conn.prepareStatement(updateSql)) {
+                    updateStmt.setDouble(1, newAmount);
+                    updateStmt.setString(2, finalScheduledFor);
+                    updateStmt.setInt(3, transactionId);
+                    updateStmt.executeUpdate();
+                }
+
+                // 3. If it's an outgoing transfer, sync the recipient's matching transfer_in leg
+                if ("transfer_out".equals(type) && relatedAccount != null) {
+                    int counterpartId = findCounterpartTransferId(conn, relatedAccount, accountNumber, oldAmount, oldScheduledFor);
+                    if (counterpartId != -1) {
+                        try (PreparedStatement updateCounterpart = conn.prepareStatement(updateSql)) {
+                            updateCounterpart.setDouble(1, newAmount);
+                            updateCounterpart.setString(2, finalScheduledFor);
+                            updateCounterpart.setInt(3, counterpartId);
+                            updateCounterpart.executeUpdate();
+                        }
+                    }
+                }
+
+                conn.commit();
+                System.out.println("Scheduled transaction #" + transactionId + " updated successfully.");
+                return true;
+
+            } catch (SQLException e) {
+                conn.rollback();
+                System.out.println("Failed to edit scheduled transaction: " + e.getMessage());
+            }
+        } catch (SQLException e) {
+            System.out.println("Database connection error: " + e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * Private helper to locate the recipient's matching 'transfer_in' row for a scheduled transfer.
+     */
+    private static int findCounterpartTransferId(Connection conn, String recipientAcc, String senderAcc,
+                                                 double amount, String scheduledFor) throws SQLException {
+        String sql = "SELECT transaction_id FROM transactions " +
+                     "WHERE account_number = ? AND related_account = ? " +
+                     "AND transaction_type = 'transfer_in' AND amount = ? " +
+                     "AND scheduled_for = ? AND status = 'pending' LIMIT 1";
+
+        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, recipientAcc);
+            pstmt.setString(2, senderAcc);
+            pstmt.setDouble(3, amount);
+            pstmt.setString(4, scheduledFor);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("transaction_id");
+                }
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Cancels a pending payment by updating its status to 'cancelled'.
+     */
+    public static boolean cancelScheduledTransaction(int transactionId) {
+        String selectSql = "SELECT account_number, transaction_type, amount, related_account, status, scheduled_for " +
+                           "FROM transactions WHERE transaction_id = ?";
+        String cancelSql = "UPDATE transactions SET status = 'cancelled' " +
+                           "WHERE transaction_id = ? AND status = 'pending'";
+
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                String accountNumber;
+                String type;
+                double amount;
+                String relatedAccount;
+                String status;
+                String scheduledFor;
+
+                // 1. Fetch and validate the existing transaction
+                try (PreparedStatement selectStmt = conn.prepareStatement(selectSql)) {
+                    selectStmt.setInt(1, transactionId);
+                    try (ResultSet rs = selectStmt.executeQuery()) {
+                        if (!rs.next()) {
+                            throw new SQLException("Transaction ID " + transactionId + " not found.");
+                        }
+                        accountNumber = rs.getString("account_number");
+                        type = rs.getString("transaction_type");
+                        amount = rs.getDouble("amount");
+                        relatedAccount = rs.getString("related_account");
+                        status = rs.getString("status");
+                        scheduledFor = rs.getString("scheduled_for");
+                    }
+                }
+
+                if (!"pending".equals(status)) {
+                    throw new SQLException("Only pending transactions can be cancelled (current status: " + status + ").");
+                }
+                if ("transfer_in".equals(type)) {
+                    throw new SQLException("Recipients cannot cancel an incoming scheduled transfer.");
+                }
+
+                // 2. Cancel the primary transaction
+                try (PreparedStatement cancelStmt = conn.prepareStatement(cancelSql)) {
+                    cancelStmt.setInt(1, transactionId);
+                    cancelStmt.executeUpdate();
+                }
+
+                // 3. If it's an outgoing transfer, cancel the recipient's matching transfer_in leg
+                if ("transfer_out".equals(type) && relatedAccount != null) {
+                    int counterpartId = findCounterpartTransferId(conn, relatedAccount, accountNumber, amount, scheduledFor);
+                    if (counterpartId != -1) {
+                        try (PreparedStatement cancelCounterpart = conn.prepareStatement(cancelSql)) {
+                            cancelCounterpart.setInt(1, counterpartId);
+                            cancelCounterpart.executeUpdate();
+                        }
+                    }
+                }
+
+                conn.commit();
+                System.out.println("Scheduled transaction #" + transactionId + " cancelled successfully.");
+                return true;
+
+            } catch (SQLException e) {
+                conn.rollback();
+                System.out.println("Failed to cancel scheduled transaction: " + e.getMessage());
+            }
+        } catch (SQLException e) {
+            System.out.println("Database connection error: " + e.getMessage());
+        }
+        return false;
+    }
+
+    // -- GETTERS --
     /**
      * Queries the ledger and prints a chronological bank statement for a specific account.
      */
@@ -196,8 +382,8 @@ public class TransactionDAO {
         List<Transaction> transactions = new ArrayList<>();
 
         // ORDER BY timestamp ASC ensures chronological order (oldest to newest)
-        String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, status, scheduled_for, timestamp " +
-                     "FROM transactions WHERE account_number = ? ORDER BY timestamp ASC";
+        String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, status, scheduled_for, created_at " +
+                     "FROM transactions WHERE account_number = ? ORDER BY created_at ASC";
 
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -220,10 +406,10 @@ public class TransactionDAO {
                     String relatedAcc = rs.getString("related_account");
                     String status = rs.getString("status");
                     String scheduledFor = rs.getString("scheduled_for");
-                    String timestamp = rs.getString("timestamp");
+                    String created_at = rs.getString("created_at");
 
                     // Create the model and add it to the list
-                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, status, scheduledFor, timestamp);
+                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, status, scheduledFor, created_at);
                     transactions.add(transaction);
 
                     // Determine if money is coming in or going out for formatting
@@ -237,7 +423,7 @@ public class TransactionDAO {
                     // Show the related account only if it was a transfer
                     String details = (relatedAcc != null) ? "Account #" + relatedAcc : "-";
 
-                    System.out.printf("%-20s | %-14s | %-10s | %s%n", timestamp, type, amountDisplay, details);
+                    System.out.printf("%-20s | %-14s | %-10s | %s%n", created_at, type, amountDisplay, details);
                 }
 
                 if (!hasTransactions) {
@@ -252,5 +438,36 @@ public class TransactionDAO {
         return transactions;
     }
 
-    // Method to edit payments
+    /**
+     * Fetches only upcoming 'pending' transactions for an account, ordered soonest first.
+     * Useful for populating a "Scheduled Payments" table in the UI.
+     */
+    public static List<Transaction> getPendingTransactionsByAccountNumber(String accountNumber) {
+        List<Transaction> pendingList = new ArrayList<>();
+        String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, status, scheduled_for, created_at " +
+                     "FROM transactions WHERE account_number = ? AND status = 'pending' ORDER BY scheduled_for ASC";
+
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, accountNumber);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    pendingList.add(new Transaction(
+                        rs.getInt("transaction_id"),
+                        rs.getString("account_number"),
+                        rs.getString("transaction_type"),
+                        rs.getDouble("amount"),
+                        rs.getString("related_account"),
+                        rs.getString("status"),
+                        rs.getString("scheduled_for"),
+                        rs.getString("created_at")
+                    ));
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println("Error fetching pending transactions: " + e.getMessage());
+        }
+        return pendingList;
+    }
 }
