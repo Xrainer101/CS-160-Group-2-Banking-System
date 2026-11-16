@@ -2,6 +2,7 @@
 import os
 import sqlite3
 import json
+import logging
 import time
 import re
 from decimal import Decimal
@@ -16,6 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware  # Backend and frontend commu
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer   # Bearer Token authentication
 from pydantic import BaseModel, EmailStr, Field, field_validator # Validate request data
 import jpype
+
+logger = logging.getLogger("uvicorn.error")
 
 # Basic settings 
 DATABASE_PATH = os.getenv(
@@ -296,11 +299,15 @@ def check_auth0_token(credentials: HTTPAuthorizationCredentials = Depends(securi
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         token_data = validate_auth0_token(credentials.credentials)
-    except Exception:
+    except Exception as exc:
+        logger.exception(
+            "Auth0 token validation failed (%s)",
+            type(exc).__name__,
+        )
         raise HTTPException(
             status_code=401,
             detail="Invalid or expired Auth0 token"
-        )
+        ) from exc
 
     if not token_data.get("sub"):
         raise HTTPException(
