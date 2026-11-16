@@ -4,7 +4,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -13,24 +12,33 @@ public class TransactionDAO {
      * Private helper to log a transaction record on an active connection.
      */
     private static void logTransaction(Connection conn, String accountNumber, String type, double amount, String relatedAccount, String status, String scheduledFor) throws SQLException {
-        String sql = "INSERT INTO transactions (account_number, transaction_type, amount, related_account, status, scheduled_for) VALUES (?, ?, ?, ?, ?, ?)";
-        
+        logTransaction(conn, accountNumber, type, amount, relatedAccount, status, 0, "none", scheduledFor);
+    }
+
+    // Full 9-argument method supporting custom recurring intervals
+    public static void logTransaction(Connection conn, String accountNumber, String type, double amount,
+                                    String relatedAccount, String status, int recurrenceInterval,
+                                    String recurrenceUnit, String scheduledFor) throws SQLException {
+        String sql = "INSERT INTO transactions " +
+                    "(account_number, transaction_type, amount, related_account, status, " +
+                    "recurrence_interval, recurrence_unit, scheduled_for) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+
         try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, accountNumber);
             pstmt.setString(2, type);
             pstmt.setDouble(3, amount);
-            
-            if (relatedAccount != null) {
-                pstmt.setString(4, relatedAccount);
-            } else {
-                pstmt.setNull(4, Types.VARCHAR); // Handles standard deposits/withdrawals
-            }
+
+            if (relatedAccount != null) pstmt.setString(4, relatedAccount);
+            else pstmt.setNull(4, java.sql.Types.VARCHAR);
 
             pstmt.setString(5, status);
-        
-            if (scheduledFor != null) pstmt.setString(6, scheduledFor);
-            else pstmt.setNull(6, java.sql.Types.VARCHAR); // SQLite will use DEFAULT CURRENT_TIMESTAMP
-            
+            pstmt.setInt(6, recurrenceInterval);
+            pstmt.setString(7, (recurrenceUnit != null) ? recurrenceUnit.toLowerCase() : "none");
+
+            if (scheduledFor != null) pstmt.setString(8, scheduledFor);
+            else pstmt.setNull(8, java.sql.Types.VARCHAR);
+
             pstmt.executeUpdate();
         }
     }
@@ -277,20 +285,93 @@ public class TransactionDAO {
         return false;
     }
 
-    // -- EDITORS --
+    // Reocccuring payments
+    public static boolean scheduleRecurringBill(String fromAccountNumber, String payeeLabel, double amount,
+                                            String firstPaymentDate, int interval, String unit) {
+        if (amount <= 0) {
+            System.out.println("Bill payment failed: Amount must be greater than zero.");
+            return false;
+        }
+
+        String normalizedUnit = (unit != null) ? unit.toLowerCase() : "none";
+        if (interval <= 0 || !java.util.List.of("days", "weeks", "months", "years").contains(normalizedUnit)) {
+            System.out.println("Bill payment failed: Interval must be > 0 and unit must be days, weeks, months, or years.");
+            return false;
+        }
+
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                String targetLabel = (payeeLabel.startsWith("EXT-") || payeeLabel.startsWith("BILL-"))
+                                    ? payeeLabel
+                                    : "BILL-" + payeeLabel;
+
+                TransactionDAO.logTransaction(
+                    conn, fromAccountNumber, "withdrawal", amount, targetLabel,
+                    "pending", interval, normalizedUnit, firstPaymentDate
+                );
+
+                conn.commit();
+                System.out.println("Scheduled bill of $" + String.format("%.2f", amount) +
+                                " to " + targetLabel + " every " + interval + " " + normalizedUnit +
+                                " starting " + firstPaymentDate);
+                return true;
+            } catch (SQLException e) {
+                conn.rollback();
+                System.out.println("Failed to schedule recurring bill: " + e.getMessage());
+            }
+        } catch (SQLException e) {
+            System.out.println("Database connection error: " + e.getMessage());
+        }
+        return false;
+    }
+
+    public static String calculateNextScheduledDate(String currentScheduledFor, int interval, String unit) {
+        if (interval <= 0 || unit == null || "none".equalsIgnoreCase(unit)) {
+            return null;
+        }
+
+        java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        java.time.LocalDateTime date = java.time.LocalDateTime.parse(currentScheduledFor, formatter);
+
+        java.time.LocalDateTime nextDate = switch (unit.toLowerCase()) {
+            case "days"   -> date.plusDays(interval);
+            case "weeks"  -> date.plusWeeks(interval);
+            case "months" -> date.plusMonths(interval);
+            case "years"  -> date.plusYears(interval);
+            default       -> null;
+        };
+
+        return (nextDate != null) ? nextDate.format(formatter) : null;
+    }
+    
+
+    // ------- EDITORS --------
     /**
      * Edits the amount and/or scheduled date of a pending payment.
      * Pass null for newScheduledFor if you only want to update the amount.
      */
     public static boolean editScheduledTransaction(int transactionId, double newAmount, String newScheduledFor) {
+        return editScheduledTransaction(transactionId, newAmount, newScheduledFor, null, null);
+    }
+
+    /**
+     * Full method: Edits amount, scheduled date, recurrence interval, and/or recurrence unit
+     * on a pending scheduled transaction or recurring bill.
+     * Pass null for newScheduledFor, newRecurrenceInterval, or newRecurrenceUnit to keep current values.
+     */
+    public static boolean editScheduledTransaction(int transactionId, double newAmount, String newScheduledFor,
+                                                   Integer newRecurrenceInterval, String newRecurrenceUnit) {
         if (newAmount <= 0) {
             System.out.println("Edit failed: Amount must be greater than zero.");
             return false;
         }
 
-        String selectSql = "SELECT account_number, transaction_type, amount, related_account, status, scheduled_for " +
+        String selectSql = "SELECT account_number, transaction_type, amount, related_account, status, " +
+                           "recurrence_interval, recurrence_unit, scheduled_for " +
                            "FROM transactions WHERE transaction_id = ?";
-        String updateSql = "UPDATE transactions SET amount = ?, scheduled_for = ? " +
+        String updateSql = "UPDATE transactions " +
+                           "SET amount = ?, scheduled_for = ?, recurrence_interval = ?, recurrence_unit = ? " +
                            "WHERE transaction_id = ? AND status = 'pending'";
 
         try (Connection conn = DatabaseManager.getConnection()) {
@@ -301,9 +382,11 @@ public class TransactionDAO {
                 double oldAmount;
                 String relatedAccount;
                 String status;
+                int oldInterval;
+                String oldUnit;
                 String oldScheduledFor;
 
-                // 1. Fetch and validate the existing transaction
+                // Fetch and validate the existing transaction
                 try (PreparedStatement selectStmt = conn.prepareStatement(selectSql)) {
                     selectStmt.setInt(1, transactionId);
                     try (ResultSet rs = selectStmt.executeQuery()) {
@@ -315,6 +398,8 @@ public class TransactionDAO {
                         oldAmount = rs.getDouble("amount");
                         relatedAccount = rs.getString("related_account");
                         status = rs.getString("status");
+                        oldInterval = rs.getInt("recurrence_interval");
+                        oldUnit = rs.getString("recurrence_unit");
                         oldScheduledFor = rs.getString("scheduled_for");
                     }
                 }
@@ -326,26 +411,49 @@ public class TransactionDAO {
                     throw new SQLException("Recipients cannot edit an incoming internal transfer.");
                 }
 
+                // Resolve final values (keep existing values where null was passed)
                 String finalScheduledFor = (newScheduledFor != null && !newScheduledFor.isEmpty())
                                            ? newScheduledFor
                                            : oldScheduledFor;
 
-                // 2. Update the primary transaction
+                String finalUnit = (newRecurrenceUnit != null && !newRecurrenceUnit.isEmpty())
+                                   ? newRecurrenceUnit.toLowerCase()
+                                   : oldUnit;
+
+                int finalInterval = (newRecurrenceInterval != null)
+                                    ? newRecurrenceInterval
+                                    : oldInterval;
+
+                // Validate recurrence rules
+                if (!java.util.List.of("none", "days", "weeks", "months", "years").contains(finalUnit)) {
+                    throw new SQLException("Invalid recurrence unit: " + finalUnit);
+                }
+                if ("none".equals(finalUnit)) {
+                    finalInterval = 0; // Normalize interval to 0 if recurrence is turned off
+                } else if (finalInterval <= 0) {
+                    throw new SQLException("Recurrence interval must be greater than 0 for unit '" + finalUnit + "'.");
+                }
+
+                // Update the primary transaction
                 try (PreparedStatement updateStmt = conn.prepareStatement(updateSql)) {
                     updateStmt.setDouble(1, newAmount);
                     updateStmt.setString(2, finalScheduledFor);
-                    updateStmt.setInt(3, transactionId);
+                    updateStmt.setInt(3, finalInterval);
+                    updateStmt.setString(4, finalUnit);
+                    updateStmt.setInt(5, transactionId);
                     updateStmt.executeUpdate();
                 }
 
-                // 3. If it's an outgoing transfer, sync the recipient's matching transfer_in leg
-                if ("transfer_out".equals(type) && relatedAccount != null) {
+                // If it's an outgoing internal transfer, sync the recipient's matching transfer_in leg
+                if ("transfer_out".equals(type) && relatedAccount != null && !relatedAccount.startsWith("EXT-")) {
                     int counterpartId = findCounterpartTransferId(conn, relatedAccount, accountNumber, oldAmount, oldScheduledFor);
                     if (counterpartId != -1) {
                         try (PreparedStatement updateCounterpart = conn.prepareStatement(updateSql)) {
                             updateCounterpart.setDouble(1, newAmount);
                             updateCounterpart.setString(2, finalScheduledFor);
-                            updateCounterpart.setInt(3, counterpartId);
+                            updateCounterpart.setInt(3, finalInterval);
+                            updateCounterpart.setString(4, finalUnit);
+                            updateCounterpart.setInt(5, counterpartId);
                             updateCounterpart.executeUpdate();
                         }
                     }
@@ -470,7 +578,7 @@ public class TransactionDAO {
         List<Transaction> transactions = new ArrayList<>();
 
         // ORDER BY timestamp ASC ensures chronological order (oldest to newest)
-        String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, status, scheduled_for, created_at " +
+        String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, status, recurrence_interval, recurrence_unit, scheduled_for, created_at " +
                      "FROM transactions WHERE account_number = ? ORDER BY created_at ASC";
 
         try (Connection conn = DatabaseManager.getConnection();
@@ -493,11 +601,13 @@ public class TransactionDAO {
                     double amount = rs.getDouble("amount");
                     String relatedAcc = rs.getString("related_account");
                     String status = rs.getString("status");
+                    int recurrenceInterval = rs.getInt("recurrence_interval");
+                    String recurrenceUnit = rs.getString("recurrence_unit");
                     String scheduledFor = rs.getString("scheduled_for");
                     String created_at = rs.getString("created_at");
 
                     // Create the model and add it to the list
-                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, status, scheduledFor, created_at);
+                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, status, recurrenceInterval, recurrenceUnit, scheduledFor, created_at);
                     transactions.add(transaction);
 
                     // Determine if money is coming in or going out for formatting
@@ -532,7 +642,7 @@ public class TransactionDAO {
      */
     public static List<Transaction> getPendingTransactionsByAccountNumber(String accountNumber) {
         List<Transaction> pendingList = new ArrayList<>();
-        String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, status, scheduled_for, created_at " +
+        String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, status, recurrence_interval, recurrence_unit, scheduled_for, created_at " +
                      "FROM transactions WHERE account_number = ? AND status = 'pending' ORDER BY scheduled_for ASC";
 
         try (Connection conn = DatabaseManager.getConnection();
@@ -548,6 +658,8 @@ public class TransactionDAO {
                         rs.getDouble("amount"),
                         rs.getString("related_account"),
                         rs.getString("status"),
+                        rs.getInt("recurrence_interval"),
+                        rs.getString("recurrence_unit"),
                         rs.getString("scheduled_for"),
                         rs.getString("created_at")
                     ));
