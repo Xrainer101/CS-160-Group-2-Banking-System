@@ -91,6 +91,22 @@ public class DatabaseManager {
             System.out.println("Transactions table created successfully.");
 
             // Credit cards table
+            String createCardsTable = "CREATE TABLE IF NOT EXISTS credit_cards (" +
+                "card_id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "user_id INTEGER NOT NULL," +
+                "card_nickname TEXT DEFAULT NULL," +
+                "cardholder_name TEXT NOT NULL," +
+                "card_number TEXT NOT NULL UNIQUE," +
+                "expiration_date TEXT NOT NULL," +
+                "cvv TEXT NOT NULL," +
+                "credit_limit REAL NOT NULL DEFAULT 5000.00," +
+                "current_balance REAL NOT NULL DEFAULT 0.00," +
+                "status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'frozen', 'closed'))," +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE);";
+            stmt.execute(createCardsTable);
+
+            System.out.println("Cards table created successfully.");
 
             System.out.println("Database and tables created successfully.");
 
@@ -315,72 +331,129 @@ public class DatabaseManager {
         // // Test finding again
         // BankAccountDAO.getBankAccountsByUsername("john_doe");
 
-        System.out.println("=== 1. SETUP: Creating User & Checking Account ===");
-        UserDAO.registerUser("dana_bills", "Dana", "Lee", "dana@example.com", "5559876543", "hash_dana");
-        int userId = UserDAO.getUserIdByUsername("dana_bills");
-        String checkingAcc = BankAccountDAO.createBankAccount(userId, "checking", 2500.00);
+        // System.out.println("=== 1. SETUP: Creating User & Checking Account ===");
+        // UserDAO.registerUser("dana_bills", "Dana", "Lee", "dana@example.com", "5559876543", "hash_dana");
+        // int userId = UserDAO.getUserIdByUsername("dana_bills");
+        // String checkingAcc = BankAccountDAO.createBankAccount(userId, "checking", 2500.00);
 
-        System.out.println("\n=== 2. SCHEDULE: Creating Two Custom Recurring Bills ===");
-        // Bill #1: Every 10 days to PG&E ($120.50)
-        boolean bill1Scheduled = TransactionDAO.scheduleRecurringBill(
-            checkingAcc, "PG&E", 120.50, "2026-12-01 08:00:00", 10, "days"
+        // System.out.println("\n=== 2. SCHEDULE: Creating Two Custom Recurring Bills ===");
+        // // Bill #1: Every 10 days to PG&E ($120.50)
+        // boolean bill1Scheduled = TransactionDAO.scheduleRecurringBill(
+        //     checkingAcc, "PG&E", 120.50, "2026-12-01 08:00:00", 10, "days"
+        // );
+        // // Bill #2: Every 3 months to Gym Membership ($45.00)
+        // boolean bill2Scheduled = TransactionDAO.scheduleRecurringBill(
+        //     checkingAcc, "Gym Membership", 45.00, "2026-12-05 09:00:00", 3, "months"
+        // );
+        // System.out.println("Bills scheduled (expected true / true): " + bill1Scheduled + " / " + bill2Scheduled);
+
+        // // Verify balance is untouched while pending
+        // double balance = BankAccountDAO.getBankAccountsByUsername("dana_bills").get(0).getBalance();
+        // System.out.println("Balance while pending (expected $2500.00): $" + String.format("%.2f", balance));
+
+        // List<Transaction> pendingBills = TransactionDAO.getPendingTransactionsByAccountNumber(checkingAcc);
+        // Transaction pgeBill = pendingBills.get(0); // Dec 1
+        // Transaction gymBill = pendingBills.get(1); // Dec 5
+
+        // System.out.println("\n=== 3. EDIT INTERVAL & UNIT: Changing PG&E from 10 days to 2 weeks ===");
+        // boolean editRecurrence = TransactionDAO.editScheduledTransaction(
+        //     pgeBill.getTransactionId(), 135.00, "2026-12-03 08:00:00", 2, "weeks"
+        // );
+        // System.out.println("Updated PG&E recurrence (expected true): " + editRecurrence);
+
+        // Transaction updatedPge = TransactionDAO.getPendingTransactionsByAccountNumber(checkingAcc).get(0);
+        // System.out.println("PG&E Now -> $" + updatedPge.getAmount() +
+        //                    " | Every " + updatedPge.getRecurrenceInterval() + " " + updatedPge.getRecurrenceUnit() +
+        //                    " | Next Date: " + updatedPge.getScheduledFor());
+
+        // // Verify next-cycle date calculation on the updated recurrence
+        // String nextCycleDate = TransactionDAO.calculateNextScheduledDate(
+        //     updatedPge.getScheduledFor(), updatedPge.getRecurrenceInterval(), updatedPge.getRecurrenceUnit()
+        // );
+        // System.out.println("Calculated subsequent cycle date (expected 2026-12-17 08:00:00): " + nextCycleDate);
+
+        // System.out.println("\n=== 4. CONVERT TO ONE-TIME: Turning Gym Bill into a Single Payment ===");
+        // // Passing "none" automatically normalizes recurrence_interval to 0
+        // boolean convertOneTime = TransactionDAO.editScheduledTransaction(
+        //     gymBill.getTransactionId(), 45.00, null, 99, "none"
+        // );
+        // System.out.println("Converted Gym bill to one-time (expected true): " + convertOneTime);
+
+        // Transaction updatedGym = TransactionDAO.getPendingTransactionsByAccountNumber(checkingAcc).get(1);
+        // System.out.println("Gym Now  -> Interval: " + updatedGym.getRecurrenceInterval() +
+        //                    " (expected 0) | Unit: " + updatedGym.getRecurrenceUnit() + " (expected none)");
+
+        // System.out.println("\n=== 5. GUARDRAIL CHECK: Invalid Recurrence Edit ===");
+        // boolean invalidEdit = TransactionDAO.editScheduledTransaction(
+        //     updatedPge.getTransactionId(), 135.00, null, 0, "months"
+        // );
+        // System.out.println("Zero interval with 'months' blocked (expected false): " + invalidEdit);
+
+        // System.out.println("\n=== 6. LEDGER AUDIT ===");
+        // for (Transaction tx : TransactionDAO.getTransactionsByAccountNumber(checkingAcc)) {
+        //     System.out.printf("ID: %d | Payee: %-19s | Amount: $%-7.2f | Every: %d %-6s | Status: %-8s | Scheduled: %s%n",
+        //         tx.getTransactionId(), tx.getRelatedAccount(), tx.getAmount(),
+        //         tx.getRecurrenceInterval(), tx.getRecurrenceUnit(), tx.getStatus(), tx.getScheduledFor());
+        // }
+
+        // System.out.println("\n=== 7. TEARDOWN: Cleaning Test User ===");
+        // UserDAO.deleteUser("dana_bills");
+
+        System.out.println("=== 1. SETUP: Creating Test User ===");
+        UserDAO.registerUser("evan_cards", "Evan", "Miller", "evan@example.com", "5552229999", "hash_evan");
+        int userId = UserDAO.getUserIdByUsername("evan_cards");
+
+        System.out.println("\n=== 2. ADD CARD: Creating Credit Card & Testing Duplicate Guard ===");
+        boolean added = CreditCardDAO.addCreditCard(
+            userId, "Travel Rewards", "Evan Miller", "4532015112830366", "09/29", "842", 7500.00
         );
-        // Bill #2: Every 3 months to Gym Membership ($45.00)
-        boolean bill2Scheduled = TransactionDAO.scheduleRecurringBill(
-            checkingAcc, "Gym Membership", 45.00, "2026-12-05 09:00:00", 3, "months"
+        System.out.println("Credit card added (expected true): " + added);
+
+        // Attempt to add the exact same card number again
+        boolean duplicateAdded = CreditCardDAO.addCreditCard(
+            userId, "Duplicate Card", "Evan Miller", "4532015112830366", "09/29", "842", 5000.00
         );
-        System.out.println("Bills scheduled (expected true / true): " + bill1Scheduled + " / " + bill2Scheduled);
+        System.out.println("Duplicate card blocked (expected false): " + duplicateAdded);
 
-        // Verify balance is untouched while pending
-        double balance = BankAccountDAO.getBankAccountsByUsername("dana_bills").get(0).getBalance();
-        System.out.println("Balance while pending (expected $2500.00): $" + String.format("%.2f", balance));
+        // Fetch dynamically to get the generated card_id
+        List<CreditCard> cards = CreditCardDAO.getCreditCardsByUserId(userId);
+        CreditCard card = cards.get(0);
+        int cardId = card.getCardId();
 
-        List<Transaction> pendingBills = TransactionDAO.getPendingTransactionsByAccountNumber(checkingAcc);
-        Transaction pgeBill = pendingBills.get(0); // Dec 1
-        Transaction gymBill = pendingBills.get(1); // Dec 5
+        System.out.println("Fetched Card -> ID: " + cardId +
+                           " | Nickname: " + card.getCardNickname() +
+                           " | Masked: " + card.getMaskedCardNumber() +
+                           " | Limit: $" + String.format("%.2f", card.getCreditLimit()) +
+                           " | Status: " + card.getStatus());
 
-        System.out.println("\n=== 3. EDIT INTERVAL & UNIT: Changing PG&E from 10 days to 2 weeks ===");
-        boolean editRecurrence = TransactionDAO.editScheduledTransaction(
-            pgeBill.getTransactionId(), 135.00, "2026-12-03 08:00:00", 2, "weeks"
-        );
-        System.out.println("Updated PG&E recurrence (expected true): " + editRecurrence);
+        System.out.println("\n=== 3. BALANCE UPDATE: Simulating Charges & Checking Available Credit ===");
+        boolean balanceUpdated = CreditCardDAO.updateCardBalance(cardId, 1250.50);
+        System.out.println("Balance updated (expected true): " + balanceUpdated);
 
-        Transaction updatedPge = TransactionDAO.getPendingTransactionsByAccountNumber(checkingAcc).get(0);
-        System.out.println("PG&E Now -> $" + updatedPge.getAmount() +
-                           " | Every " + updatedPge.getRecurrenceInterval() + " " + updatedPge.getRecurrenceUnit() +
-                           " | Next Date: " + updatedPge.getScheduledFor());
+        CreditCard afterCharge = CreditCardDAO.getCreditCardsByUserId(userId).get(0);
+        System.out.println("Current Balance (expected $1250.50):   $" + String.format("%.2f", afterCharge.getCurrentBalance()));
+        System.out.println("Available Credit (expected $6249.50):  $" + String.format("%.2f", afterCharge.getAvailableCredit()));
 
-        // Verify next-cycle date calculation on the updated recurrence
-        String nextCycleDate = TransactionDAO.calculateNextScheduledDate(
-            updatedPge.getScheduledFor(), updatedPge.getRecurrenceInterval(), updatedPge.getRecurrenceUnit()
-        );
-        System.out.println("Calculated subsequent cycle date (expected 2026-12-17 08:00:00): " + nextCycleDate);
+        // Guardrail check: negative balance should fail
+        boolean negativeBlocked = CreditCardDAO.updateCardBalance(cardId, -50.00);
+        System.out.println("Negative balance blocked (expected false): " + negativeBlocked);
 
-        System.out.println("\n=== 4. CONVERT TO ONE-TIME: Turning Gym Bill into a Single Payment ===");
-        // Passing "none" automatically normalizes recurrence_interval to 0
-        boolean convertOneTime = TransactionDAO.editScheduledTransaction(
-            gymBill.getTransactionId(), 45.00, null, 99, "none"
-        );
-        System.out.println("Converted Gym bill to one-time (expected true): " + convertOneTime);
+        System.out.println("\n=== 4. STATUS TOGGLE: Freezing & Reactivating Card ===");
+        CreditCardDAO.updateCardStatus(cardId, "frozen");
+        String frozenStatus = CreditCardDAO.getCreditCardsByUserId(userId).get(0).getStatus();
+        System.out.println("Status after freeze (expected frozen): " + frozenStatus);
 
-        Transaction updatedGym = TransactionDAO.getPendingTransactionsByAccountNumber(checkingAcc).get(1);
-        System.out.println("Gym Now  -> Interval: " + updatedGym.getRecurrenceInterval() +
-                           " (expected 0) | Unit: " + updatedGym.getRecurrenceUnit() + " (expected none)");
+        CreditCardDAO.updateCardStatus(cardId, "active");
+        String activeStatus = CreditCardDAO.getCreditCardsByUserId(userId).get(0).getStatus();
+        System.out.println("Status after unfreeze (expected active): " + activeStatus);
 
-        System.out.println("\n=== 5. GUARDRAIL CHECK: Invalid Recurrence Edit ===");
-        boolean invalidEdit = TransactionDAO.editScheduledTransaction(
-            updatedPge.getTransactionId(), 135.00, null, 0, "months"
-        );
-        System.out.println("Zero interval with 'months' blocked (expected false): " + invalidEdit);
+        // Guardrail check: invalid status string should fail
+        boolean invalidStatusBlocked = CreditCardDAO.updateCardStatus(cardId, "stolen");
+        System.out.println("Invalid status blocked (expected false): " + invalidStatusBlocked);
 
-        System.out.println("\n=== 6. LEDGER AUDIT ===");
-        for (Transaction tx : TransactionDAO.getTransactionsByAccountNumber(checkingAcc)) {
-            System.out.printf("ID: %d | Payee: %-19s | Amount: $%-7.2f | Every: %d %-6s | Status: %-8s | Scheduled: %s%n",
-                tx.getTransactionId(), tx.getRelatedAccount(), tx.getAmount(),
-                tx.getRecurrenceInterval(), tx.getRecurrenceUnit(), tx.getStatus(), tx.getScheduledFor());
-        }
-
-        System.out.println("\n=== 7. TEARDOWN: Cleaning Test User ===");
-        UserDAO.deleteUser("dana_bills");
+        System.out.println("\n=== 5. TEARDOWN: Cleaning Test User (Cascades to Credit Cards) ===");
+        UserDAO.deleteUser("evan_cards");
+        System.out.println("Remaining cards for deleted user (expected 0): " +
+                           CreditCardDAO.getCreditCardsByUserId(userId).size());
     }
 }
