@@ -1,15 +1,17 @@
 import { Bell, Menu, LogOut, Landmark } from 'lucide-react';
-export default function Navbar({ user, onMenu, onSignOut }) {
+export default function Navbar({ user, onMenu, onSignOut, showMenu = true}) {
   return (
     <header className="topbar">
       <div className="topbar-brand">
-        <button
-          className="icon-button mobile-menu"
-          onClick={onMenu}
-          aria-label="Toggle navigation"
-        >
-          <Menu size={20} />
-        </button>
+        {showMenu && (
+          <button
+            className="icon-button mobile-menu"
+            onClick={onMenu}
+            aria-label="Toggle navigation"
+          >
+            <Menu size={20} />
+          </button>
+        )}
         <span className="logo-mark">
           <Landmark size={21} />
         </span>

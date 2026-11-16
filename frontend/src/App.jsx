@@ -5,6 +5,7 @@ import {
   Navigate,
   Route,
   Routes,
+  useLocation,
   useNavigate,
 } from "react-router-dom";
 
@@ -36,6 +37,8 @@ import {
   getAccounts,
   getCurrentUser,
 } from "./api/bankingApi";
+
+import { getManagerPermission } from "./api/adminApi";
 
 import "./index.css";
 import "./styles/components.css";
@@ -92,6 +95,7 @@ function userFromProfile(profile) {
 }
 
 function AppContent() {
+  const location = useLocation();
   const navigate = useNavigate();
 
   const [session, setSession] = useState(
@@ -115,10 +119,14 @@ function AppContent() {
     useState(false);
   const [bankingError, setBankingError] =
     useState("");
+  const [canViewManagerReports, setCanViewManagerReports] =
+    useState(false);
+
+  const isManagerArea =
+    location.pathname === "/manager-dashboard" ||
+    location.pathname === "/admin";
 
   const skipNextSessionLoadRef = useRef(false);
-
-  const isAdmin = user?.role === "admin";
 
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +136,7 @@ function AppContent() {
       setTransactions([]);
       setBankingError("");
       setBankingLoading(false);
+      setCanViewManagerReports(false);
       return;
     }
 
@@ -143,6 +152,7 @@ function AppContent() {
       try {
         const profile = await getCurrentUser();
         const accountData = await getAccounts();
+        const permission = await getManagerPermission();
 
         if (cancelled) return;
 
@@ -150,6 +160,9 @@ function AppContent() {
         setAccounts(accountData.accounts || []);
         setTransactions(
           accountData.transactions || []
+        );
+        setCanViewManagerReports(
+          permission.authorized === true
         );
       } catch (error) {
         if (!cancelled) {
@@ -191,17 +204,25 @@ function AppContent() {
     try {
       const profile = await getCurrentUser();
       const accountData = await getAccounts();
+      const permission = await getManagerPermission();
 
       setUser(userFromProfile(profile));
       setAccounts(accountData.accounts || []);
       setTransactions(
         accountData.transactions || []
       );
+      setCanViewManagerReports(
+        permission.authorized === true
+      );
 
       skipNextSessionLoadRef.current = true;
       setSession(result.session);
 
-      navigate("/dashboard");
+      navigate(
+        permission.authorized === true
+          ? "/manager-dashboard"
+          : "/dashboard"
+      );
     } catch (error) {
       clearSession();
       setSession(null);
@@ -218,6 +239,7 @@ function AppContent() {
     clearSession();
     setSession(null);
     setUser(null);
+    setCanViewManagerReports(false);
     setMenuOpen(false);
     setAccounts([]);
     setTransactions([]);
@@ -342,6 +364,7 @@ function AppContent() {
       {user && (
         <Navbar
           user={user}
+          showMenu={!isManagerArea}
           onMenu={() =>
             setMenuOpen((prev) => !prev)
           }
@@ -389,7 +412,11 @@ function AppContent() {
           element={
             user ? (
               <Navigate
-                to="/dashboard"
+                to={
+                  canViewManagerReports
+                    ? "/manager-dashboard"
+                    : "/dashboard"
+                }
                 replace
               />
             ) : (
@@ -407,7 +434,11 @@ function AppContent() {
           element={
             user ? (
               <Navigate
-                to="/dashboard"
+                to={
+                  canViewManagerReports
+                    ? "/manager-dashboard"
+                    : "/dashboard"
+                }
                 replace
               />
             ) : (
@@ -425,13 +456,17 @@ function AppContent() {
           element={
             user ? (
               <div className="app-shell">
-                <Sidebar
-                  open={menuOpen}
-                  close={() =>
-                    setMenuOpen(false)
-                  }
-                  isAdmin={isAdmin}
-                />
+                {!isManagerArea && (
+                  <Sidebar
+                    open={menuOpen}
+                    close={() =>
+                      setMenuOpen(false)
+                    }
+                    canViewManagerReports={
+                      canViewManagerReports
+                    }
+                  />
+                )}
 
                 <div className="app-content">
                   <main className="main-content">
@@ -479,19 +514,26 @@ function AppContent() {
                       />
 
                       <Route
-                        path="/admin-preview"
+                        path="/admin"
                         element={
-                          <AdminPanel
-                            preview={true}
-                            user={user}
-                          />
+                          canViewManagerReports ? (
+                            <AdminPanel
+                              preview={false}
+                              user={user}
+                            />
+                          ) : (
+                            <Navigate
+                              to="/dashboard"
+                              replace
+                            />
+                          )
                         }
                       />
 
                       <Route
-                        path="/admin"
+                        path="/manager-dashboard"
                         element={
-                          isAdmin ? (
+                          canViewManagerReports ? (
                             <AdminPanel
                               preview={false}
                               user={user}

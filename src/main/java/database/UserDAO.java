@@ -6,6 +6,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 public class UserDAO {
     // Registering a User
@@ -154,6 +156,104 @@ public class UserDAO {
             }
         } catch (SQLException e) {
             System.out.println("Error finding Auth0 user: " + e.getMessage());
+            return null;
+        }
+    }
+
+    // Returns every user banking profile, used for manager reports
+    public static List<User> getAllUsers() {
+        List<User> users = new ArrayList<>();
+        String sql = "SELECT user_id, username, first_name, last_name, email, phone_number, " +
+            "date_of_birth, password_hash, role, failed_login_attempts, lockout_until, created_at " +
+            "FROM users WHERE profile_status = 'active' ORDER BY user_id";
+
+        try (Connection conn = DatabaseManager.getConnection();
+        PreparedStatement statement = conn.prepareStatement(sql);
+        ResultSet rs = statement.executeQuery()) {
+            while (rs.next()) {
+                users.add(userFromResultSet(rs));
+            }
+        } catch (SQLException e) {
+            System.out.println("Error retrieving users for manager report: " + e.getMessage());
+        }
+        return users;
+    }
+
+    /**
+     * Deactivates a customer account.
+     * The customer must have all accounts closed before being deactivated.
+     */
+    public static String deactivateCustomerById(int userId) {
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+
+            String role = null;
+            String profileStatus = null;
+            String userSql = "SELECT role, profile_status FROM users WHERE user_id = ?";
+            try (PreparedStatement userStatement = conn.prepareStatement(userSql)) {
+                userStatement.setInt(1, userId);
+                try (ResultSet rs = userStatement.executeQuery()) {
+                    if (!rs.next()) {
+                        conn.rollback();
+                        return "not_found";
+                    }
+                    role = rs.getString("role");
+                    profileStatus = rs.getString("profile_status");
+                }
+            }
+
+            if (!"customer".equalsIgnoreCase(role)) {
+                conn.rollback();
+                return "not_customer";
+            }
+            if ("inactive".equalsIgnoreCase(profileStatus)) {
+                conn.rollback();
+                return "already_inactive";
+            }
+
+            String accountSql = "SELECT COUNT(*) FROM bank_accounts " +
+                    "WHERE user_id = ? AND status != 'closed'";
+            try (PreparedStatement accountStatement = conn.prepareStatement(accountSql)) {
+                accountStatement.setInt(1, userId);
+                try (ResultSet rs = accountStatement.executeQuery()) {
+                    if (rs.next() && rs.getInt(1) > 0) {
+                        conn.rollback();
+                        return "active_accounts";
+                    }
+                }
+            }
+
+            String deactivateSql = "UPDATE users SET profile_status = 'inactive' WHERE user_id = ?";
+            try (PreparedStatement deactivateStatement = conn.prepareStatement(deactivateSql)) {
+                deactivateStatement.setInt(1, userId);
+                if (deactivateStatement.executeUpdate() != 1) {
+                    conn.rollback();
+                    return "not_found";
+                }
+            }
+
+            conn.commit();
+            return "deactivated";
+        } catch (SQLException e) {
+            System.out.println("Error deactivating customer: " + e.getMessage());
+            return "database";
+        }
+    }
+
+    // Finds a user by their user id, used for manager reports
+    public static User getUserById(int userId) {
+        String sql = "SELECT user_id, username, first_name, last_name, email, phone_number, " +
+            "date_of_birth, password_hash, role, failed_login_attempts, lockout_until, created_at " +
+            "FROM users WHERE user_id = ?";
+
+        try (Connection conn = DatabaseManager.getConnection();
+        PreparedStatement statement = conn.prepareStatement(sql)) {
+            statement.setInt(1, userId);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? userFromResultSet(rs) : null;
+            }
+        } catch (SQLException e) {
+            System.out.println("Error retrieving user for manager report: " + e.getMessage());
             return null;
         }
     }

@@ -46,6 +46,13 @@ public class DatabaseManager {
                 // The column already exists
             }
 
+            // Keep user history without deleting records, but mark them as inactive
+            try {
+                stmt.execute("ALTER TABLE users ADD COLUMN profile_status TEXT NOT NULL DEFAULT 'active' CHECK(profile_status IN ('active', 'inactive'))");
+            } catch (SQLException ignored) {
+                // The column already exists
+            }
+
             System.out.println("Users table created successfully.");
 
             // Maps an Auth0 identity to an existing banking user

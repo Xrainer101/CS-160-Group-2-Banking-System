@@ -126,6 +126,37 @@ public class BankAccountDAO {
         return accounts;
     }
 
+    // Returns the accounts for a selected user and is used for the manager report
+    public static List<BankAccount> getBankAccountsByUserId(int userId) {
+        List<BankAccount> accounts = new ArrayList<>();
+        String sql = "SELECT account_id, user_id, account_number, routing_number, account_type, " +
+                    "balance, status, opened_at, closed_at " +
+                    "FROM bank_accounts WHERE user_id = ? ORDER BY account_id";
+
+        try (Connection conn = DatabaseManager.getConnection();
+        PreparedStatement statement = conn.prepareStatement(sql)) {
+            statement.setInt(1, userId);
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) {
+                    accounts.add(new BankAccount(
+                        rs.getInt("account_id"),
+                        rs.getInt("user_id"),
+                        rs.getString("account_number"),
+                        rs.getString("routing_number"),
+                        rs.getString("account_type"),
+                        rs.getDouble("balance"),
+                        rs.getString("status"),
+                        rs.getObject("opened_at", LocalDateTime.class),
+                        rs.getObject("closed_at", LocalDateTime.class)
+                    ));
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println("Error retrieving accounts for manager report: " + e.getMessage());
+        }
+        return accounts;
+    }
+
     public static boolean closeBankAccount(String accountNumber) {
         String sql = "UPDATE bank_accounts " +
                  "SET status = 'closed', closed_at = datetime('now') " +
@@ -145,6 +176,44 @@ public class BankAccountDAO {
             }
         } catch (SQLException e) {
             System.out.println("Error closing bank account: " + e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * Gets the status of an account by ID and returns null if the ccount does not exist
+     */
+    public static String getAccountStatusById(int accountId) {
+        String sql = "SELECT status FROM bank_accounts WHERE account_id = ?";
+
+        try (Connection conn = DatabaseManager.getConnection();
+            PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, accountId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                return rs.next() ? rs.getString("status") : null;
+            }
+        } catch (SQLException e) {
+            System.out.println("Error checking bank account status: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Closes a bank account by ID 
+     * Keeps the account record and transaction history in the database
+     */
+    public static boolean closeBankAccountById(int accountId) {
+        String sql = "UPDATE bank_accounts " +
+                "SET status = 'closed', closed_at = datetime('now') " +
+                "WHERE account_id = ? AND status != 'closed'";
+
+        try (Connection conn = DatabaseManager.getConnection();
+            PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setInt(1, accountId);
+            return pstmt.executeUpdate() > 0;
+        } catch (SQLException e) {
+            System.out.println("Error closing bank account by ID: " + e.getMessage());
         }
         return false;
     }

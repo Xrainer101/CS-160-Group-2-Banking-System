@@ -13,10 +13,12 @@ import {
 } from "lucide-react";
 
 import {
-  searchClients,
-  getClientAccounts,
-  deleteClient,
-  deleteClientAccount,
+  getManagerSummary,
+  getManagerCustomers,
+  getManagerCustomerAccounts,
+  getManagerCustomerTransactions,
+  closeManagerCustomerAccount,
+  deactivateManagerCustomer,
 } from "../api/adminApi";
 
 import { money } from "../data/mockData";
@@ -108,6 +110,57 @@ function normalizeAccount(account) {
   };
 }
 
+function normalizeTransaction(transaction) {
+  return {
+    ...transaction,
+    id: transaction.transaction_id ?? transaction.id,
+    type:
+      transaction.transaction_type ||
+      transaction.type ||
+      "Transaction",
+    amount: Number(transaction.amount || 0),
+    status: transaction.status || "unknown",
+    timestamp: transaction.timestamp || "",
+  };
+}
+
+function formatCreatedDate(value) {
+  if (!value) return "Unavailable";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  return date.toLocaleString(undefined, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatDateOfBirth(value) {
+  if (!value) return "Unavailable";
+
+  const dateText = String(value);
+  const match = dateText.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const [, year, month, day] = match;
+    return `${month}/${day}/${year}`;
+  }
+
+  return dateText;
+}
+
+function formatPhoneNumber(value) {
+  if (!value) return "Unavailable";
+
+  const digits = String(value).replace(/\D/g, "");
+  if (digits.length !== 10) return String(value);
+
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
 function downloadCSV(filename, rows) {
   const escapeCell = (value) => {
     let text = String(value ?? "");
@@ -149,19 +202,22 @@ export default function AdminPanel({
   );
   const [selectedClientId, setSelectedClientId] =
     useState(null);
+  const [selectedProfile, setSelectedProfile] =
+    useState(null);
   const [selectedAccounts, setSelectedAccounts] =
     useState([]);
+  const [selectedTransactions, setSelectedTransactions] =
+    useState([]);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] =
+    useState(false);
+  const [actionLoading, setActionLoading] =
     useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [confirmation, setConfirmation] = useState("");
-  const [deleting, setDeleting] = useState(false);
-
-  async function loadClients(search = "") {
+  async function loadClients() {
     if (preview) {
       setClients(SAMPLE_CLIENTS);
       return;
@@ -171,22 +227,20 @@ export default function AdminPanel({
     setError("");
 
     try {
-      const result = await searchClients(search);
+      const result = await getManagerCustomers();
 
-      // Expected backend response: { clients: [...] }
-      if (!Array.isArray(result.clients)) {
+      // Expected backend response: { customers: [...] }
+      if (!Array.isArray(result.customers)) {
         throw new Error(
-          "The admin API returned an unexpected response."
+          "The manager API returned an unexpected response."
         );
       }
 
-      setClients(result.clients.map(normalizeClient));
+      setClients(result.customers.map(normalizeClient));
     } catch (err) {
       setClients([]);
       setError(
-        err.status === 404
-          ? "The admin client-search endpoint has not been implemented yet."
-          : err.message
+        err.message
       );
     } finally {
       setLoading(false);
@@ -198,23 +252,24 @@ export default function AdminPanel({
       setClients(SAMPLE_CLIENTS);
     } else {
       loadClients();
+      getManagerSummary()
+        .then(setSummary)
+        .catch((err) => setError(err.message));
     }
   }, [preview]);
 
-  const filteredClients = preview
-    ? clients.filter((client) => {
-        const text = [
-          client.name,
-          client.email,
-          client.username,
-          client.user_id,
-        ]
-          .join(" ")
-          .toLowerCase();
+  const filteredClients = clients.filter((client) => {
+    const text = [
+      client.name,
+      client.email,
+      client.username,
+      client.user_id,
+    ]
+      .join(" ")
+      .toLowerCase();
 
-        return text.includes(query.toLowerCase());
-      })
-    : clients;
+    return text.includes(query.toLowerCase());
+  });
 
   const selectedClient = clients.find(
     (client) =>
@@ -225,6 +280,7 @@ export default function AdminPanel({
   async function selectClient(client) {
     setSelectedClientId(client.user_id);
     setSelectedAccounts([]);
+    setSelectedTransactions([]);
     setError("");
 
     if (preview) {
@@ -237,23 +293,36 @@ export default function AdminPanel({
     setDetailLoading(true);
 
     try {
-      const result = await getClientAccounts(
-        client.user_id
-      );
+      const [accountResult, transactionResult] =
+        await Promise.all([
+          getManagerCustomerAccounts(client.user_id),
+          getManagerCustomerTransactions(client.user_id),
+        ]);
 
-      if (!Array.isArray(result.accounts)) {
+      if (!Array.isArray(accountResult.accounts)) {
         throw new Error(
-          "The accounts endpoint returned an unexpected response."
+          "The manager accounts endpoint returned an unexpected response."
+        );
+      }
+
+      if (!Array.isArray(transactionResult.transactions)) {
+        throw new Error(
+          "The manager transactions endpoint returned an unexpected response."
         );
       }
 
       setSelectedAccounts(
-        result.accounts.map(normalizeAccount)
+        accountResult.accounts.map(normalizeAccount)
+      );
+      setSelectedTransactions(
+        transactionResult.transactions.map(
+          normalizeTransaction
+        )
       );
     } catch (err) {
       setError(
         err.status === 404
-          ? "Client account lookup is not available in the backend yet."
+          ? "Customer details could not be found."
           : err.message
       );
     } finally {
@@ -261,46 +330,61 @@ export default function AdminPanel({
     }
   }
 
-  async function handleDelete() {
-    if (
-      preview ||
-      confirmation !== "DELETE" ||
-      !deleteTarget
-    ) {
-      return;
-    }
+  async function closeAccount(account) {
+    const confirmed = window.confirm(
+      `Are you sure you want to close this ${account.type} account ending in ${account.number.slice(-4)}? ` +
+      "The account and transaction history will be preserved."
+    );
+    if (!confirmed) return;
 
-    setDeleting(true);
+    setActionLoading(true);
     setError("");
+    setMessage("");
 
     try {
-      if (deleteTarget.kind === "client") {
-        await deleteClient(deleteTarget.id);
-        setSelectedClientId(null);
-        setSelectedAccounts([]);
-      } else {
-        await deleteClientAccount(deleteTarget.id);
-        setSelectedAccounts((prev) =>
-          prev.filter(
-            (account) =>
-              String(account.id) !==
-              String(deleteTarget.id)
-          )
-        );
-      }
-
-      setMessage("The deletion request was successful.");
-      setDeleteTarget(null);
-      setConfirmation("");
-      await loadClients(query);
-    } catch (err) {
-      setError(
-        err.status === 404 || err.status === 405
-          ? "Deletion has not been enabled in the backend."
-          : err.message
+      await closeManagerCustomerAccount(account.id);
+      setSelectedAccounts((accounts) =>
+        accounts.map((item) =>
+          item.id === account.id
+            ? { ...item, status: "closed" }
+            : item
+        )
       );
+      setMessage("Bank account closed successfully.");
+    } catch (err) {
+      setError(err.message);
     } finally {
-      setDeleting(false);
+      setActionLoading(false);
+    }
+  }
+
+  async function deactivateClient(client) {
+    const confirmed = window.confirm(
+      `Are you sure you want to deactivate ${client.name}'s customer profile? ` +
+      "All of the customer's accounts must already be closed."
+    );
+    if (!confirmed) return;
+
+    setActionLoading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      await deactivateManagerCustomer(client.user_id);
+      setClients((currentClients) =>
+        currentClients.filter(
+          (item) => item.user_id !== client.user_id
+        )
+      );
+      setSelectedClientId(null);
+      setSelectedProfile(null);
+      setSelectedAccounts([]);
+      setSelectedTransactions([]);
+      setMessage("Customer profile deactivated successfully.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setActionLoading(false);
     }
   }
 
@@ -325,9 +409,7 @@ export default function AdminPanel({
     ];
 
     downloadCSV(
-      preview
-        ? "sample-clients-report.csv"
-        : "admin-clients-report.csv",
+      "manager-clients-report.csv",
       rows
     );
 
@@ -355,9 +437,7 @@ export default function AdminPanel({
     ];
 
     downloadCSV(
-      preview
-        ? "sample-account-report.csv"
-        : "client-account-report.csv",
+      "manager-account-report.csv",
       rows
     );
 
@@ -396,7 +476,6 @@ export default function AdminPanel({
             <strong>Administrator view</strong>
             <p>
               Signed in as {user?.name || "Administrator"}.
-              Data is requested using your Auth0 token.
             </p>
           </div>
         </div>
@@ -442,7 +521,7 @@ export default function AdminPanel({
               <button
                 type="button"
                 className="button"
-                onClick={() => loadClients(query)}
+                onClick={loadClients}
                 disabled={loading}
               >
                 <RefreshCw size={16} />
@@ -454,7 +533,7 @@ export default function AdminPanel({
               className="admin-search"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (!preview) loadClients(query);
+                loadClients();
               }}
             >
               <Search size={20} />
@@ -506,6 +585,15 @@ export default function AdminPanel({
                               type="button"
                               className="text-link"
                               onClick={() =>
+                                setSelectedProfile(client)
+                              }
+                            >
+                              View profile
+                            </button>
+                            <button
+                              type="button"
+                              className="text-link"
+                              onClick={() =>
                                 selectClient(client)
                               }
                             >
@@ -514,15 +602,9 @@ export default function AdminPanel({
                             <button
                               type="button"
                               className="admin-danger-button"
-                              disabled={preview}
-                              onClick={() => {
-                                setDeleteTarget({
-                                  kind: "client",
-                                  id: client.user_id,
-                                  name: client.name,
-                                });
-                                setConfirmation("");
-                              }}
+                              disabled={actionLoading}
+                              onClick={() => deactivateClient(client)}
+                              title="Deactivate customer profile"
                             >
                               <Trash2 size={15} />
                               Delete
@@ -536,6 +618,61 @@ export default function AdminPanel({
               </div>
             )}
           </section>
+
+          {selectedProfile && (
+            <section className="panel">
+              <div className="admin-heading-row">
+                <div>
+                  <h2>{selectedProfile.name}</h2>
+                  <p className="panel-subtitle">
+                    Customer profile
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="text-link"
+                  onClick={() => setSelectedProfile(null)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="admin-profile-grid">
+                <div>
+                  <small>Full name</small>
+                  <strong>{selectedProfile.name || "Unavailable"}</strong>
+                </div>
+                <div>
+                  <small>Username</small>
+                  <strong>{selectedProfile.username || "Unavailable"}</strong>
+                </div>
+                <div>
+                  <small>Email</small>
+                  <strong>{selectedProfile.email || "Unavailable"}</strong>
+                </div>
+                <div>
+                  <small>Phone number</small>
+                  <strong>{formatPhoneNumber(selectedProfile.phone_number)}</strong>
+                </div>
+                <div>
+                  <small>Date of birth</small>
+                  <strong>{formatDateOfBirth(selectedProfile.date_of_birth)}</strong>
+                </div>
+                <div>
+                  <small>Role</small>
+                  <strong>{selectedProfile.role || "customer"}</strong>
+                </div>
+                <div>
+                  <small>Created date</small>
+                  <strong>{formatCreatedDate(selectedProfile.created_at)}</strong>
+                </div>
+                <div>
+                  <small>User ID</small>
+                  <strong>{selectedProfile.user_id || "Unavailable"}</strong>
+                </div>
+              </div>
+            </section>
+          )}
 
           {selectedClient && (
             <section className="panel">
@@ -576,25 +713,65 @@ export default function AdminPanel({
                     <strong>
                       {money(account.balance)}
                     </strong>
-                    <button
-                      type="button"
-                      className="admin-danger-button"
-                      disabled={preview}
-                      onClick={() => {
-                        setDeleteTarget({
-                          kind: "account",
-                          id: account.id,
-                          name: account.type,
-                        });
-                        setConfirmation("");
-                      }}
-                    >
-                      <Trash2 size={15} />
-                      Delete
-                    </button>
+                    {String(account.status).toLowerCase() === "closed" ? (
+                      <span className="account-status-badge">
+                        Closed
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="admin-danger-button"
+                        disabled={actionLoading}
+                        onClick={() => closeAccount(account)}
+                        title="Close bank account"
+                      >
+                        <Trash2 size={15} />
+                        Delete
+                      </button>
+                    )}
                   </div>
                 ))
               )}
+              <div className="admin-transactions">
+                <h3>Transaction history</h3>
+                {detailLoading ? (
+                  <p>Loading transactions...</p>
+                ) : selectedTransactions.length === 0 ? (
+                  <p className="empty">
+                    No transactions available.
+                  </p>
+                ) : (
+                  <div className="admin-table-wrap">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Type</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                          <th>Timestamp</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedTransactions.map(
+                          (transaction) => (
+                            <tr key={transaction.id}>
+                              <td>{transaction.type}</td>
+                              <td>
+                                {money(transaction.amount)}
+                              </td>
+                              <td>{transaction.status}</td>
+                              <td>
+                                {transaction.timestamp ||
+                                  "Unavailable"}
+                              </td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
 
               <button
                 type="button"
@@ -626,8 +803,10 @@ export default function AdminPanel({
             </article>
             <article className="panel">
               <FileBarChart size={23} />
-              <small>Report format</small>
-              <h2>CSV</h2>
+              <small>Total bank balance</small>
+              <h2>
+                {money(summary?.total_balance || 0)}
+              </h2>
             </article>
           </div>
 
@@ -679,65 +858,6 @@ export default function AdminPanel({
         </>
       )}
 
-      {deleteTarget && !preview && (
-        <div className="admin-modal-backdrop">
-          <div
-            className="admin-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="admin-delete-title"
-          >
-            <AlertTriangle size={28} />
-            <h2 id="admin-delete-title">
-              Confirm deletion
-            </h2>
-            <p>
-              You are requesting deletion of{" "}
-              <strong>{deleteTarget.name}</strong>.
-              This may be irreversible.
-            </p>
-            <p>
-              Type <strong>DELETE</strong> to confirm.
-            </p>
-
-            <input
-              autoFocus
-              value={confirmation}
-              onChange={(e) =>
-                setConfirmation(e.target.value)
-              }
-              placeholder="DELETE"
-              aria-label="Type DELETE to confirm"
-            />
-
-            <div className="admin-actions">
-              <button
-                type="button"
-                className="button"
-                onClick={() => {
-                  setDeleteTarget(null);
-                  setConfirmation("");
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="admin-danger-button"
-                disabled={
-                  confirmation !== "DELETE" ||
-                  deleting
-                }
-                onClick={handleDelete}
-              >
-                {deleting
-                  ? "Deleting..."
-                  : "Confirm deletion"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
