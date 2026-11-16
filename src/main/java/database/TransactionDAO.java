@@ -187,7 +187,95 @@ public class TransactionDAO {
         return false;
     }
 
-    // Scheduled transfers
+    // -------- EXTERNAL ACCOUNT TRANSFERS
+
+    /**
+     * Immediate transfer to external account
+     */
+    public static boolean transferToExternal(String fromInternalAccount, int externalAccountId, double amount) {
+        return transferToExternal(fromInternalAccount, externalAccountId, amount, null);
+    }
+
+    /**
+     * Unified transfer to external account (Immediate or Scheduled)
+     */
+    public static boolean transferToExternal(String fromInternalAccount, int externalAccountId,
+                                             double amount, String scheduledFor) {
+        ExternalAccount ext = ExternalAccountDAO.getExternalAccountById(externalAccountId);
+        if (ext == null) {
+            System.out.println("Transfer failed: External account not found.");
+            return false;
+        }
+
+        String externalLabel = "EXT-" + ext.getAccountNumber();
+
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                if (scheduledFor == null) {
+                    processWithdrawal(conn, fromInternalAccount, amount);
+                    TransactionDAO.logTransaction(conn, fromInternalAccount, "transfer_out",
+                                                  amount, externalLabel, "completed", null);
+                } else {
+                    TransactionDAO.logTransaction(conn, fromInternalAccount, "transfer_out",
+                                                  amount, externalLabel, "pending", scheduledFor);
+                }
+
+                conn.commit();
+                return true;
+            } catch (SQLException e) {
+                conn.rollback();
+                System.out.println("External outgoing transfer failed: " + e.getMessage());
+            }
+        } catch (SQLException e) {
+            System.out.println("Database connection error: " + e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * Immediate transfer from external account
+     */
+    public static boolean transferFromExternal(int externalAccountId, String toInternalAccount, double amount) {
+        return transferFromExternal(externalAccountId, toInternalAccount, amount, null);
+    }
+
+    /**
+     * Unified transfer from external account (Immediate or Scheduled)
+     */
+    public static boolean transferFromExternal(int externalAccountId, String toInternalAccount,
+                                               double amount, String scheduledFor) {
+        ExternalAccount ext = ExternalAccountDAO.getExternalAccountById(externalAccountId);
+        if (ext == null) {
+            System.out.println("Transfer failed: External account not found.");
+            return false;
+        }
+
+        String externalLabel = "EXT-" + ext.getAccountNumber();
+
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                if (scheduledFor == null) {
+                    processDeposit(conn, toInternalAccount, amount);
+                    TransactionDAO.logTransaction(conn, toInternalAccount, "transfer_in",
+                                                  amount, externalLabel, "completed", null);
+                } else {
+                    TransactionDAO.logTransaction(conn, toInternalAccount, "transfer_in",
+                                                  amount, externalLabel, "pending", scheduledFor);
+                }
+
+                conn.commit();
+                return true;
+            } catch (SQLException e) {
+                conn.rollback();
+                System.out.println("External incoming transfer failed: " + e.getMessage());
+            }
+        } catch (SQLException e) {
+            System.out.println("Database connection error: " + e.getMessage());
+        }
+        return false;
+    }
 
     // -- EDITORS --
     /**
@@ -234,8 +322,8 @@ public class TransactionDAO {
                 if (!"pending".equals(status)) {
                     throw new SQLException("Only pending transactions can be edited (current status: " + status + ").");
                 }
-                if ("transfer_in".equals(type)) {
-                    throw new SQLException("Recipients cannot edit an incoming scheduled transfer.");
+                if ("transfer_in".equals(type) && (relatedAccount == null || !relatedAccount.startsWith("EXT-"))) {
+                    throw new SQLException("Recipients cannot edit an incoming internal transfer.");
                 }
 
                 String finalScheduledFor = (newScheduledFor != null && !newScheduledFor.isEmpty())
@@ -339,8 +427,8 @@ public class TransactionDAO {
                 if (!"pending".equals(status)) {
                     throw new SQLException("Only pending transactions can be cancelled (current status: " + status + ").");
                 }
-                if ("transfer_in".equals(type)) {
-                    throw new SQLException("Recipients cannot cancel an incoming scheduled transfer.");
+                if ("transfer_in".equals(type) && (relatedAccount == null || !relatedAccount.startsWith("EXT-"))) {
+                    throw new SQLException("Recipients cannot cancel an incoming internal transfer.");
                 }
 
                 // 2. Cancel the primary transaction

@@ -57,6 +57,22 @@ public class DatabaseManager {
 
             System.out.println("Accounts table created successfully.");
 
+            // Create External Account table
+            String createExtAccountTable = "CREATE TABLE IF NOT EXISTS external_accounts (" +
+                "external_account_id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "user_id INTEGER NOT NULL," +
+                "bank_name TEXT NOT NULL," + 
+                "account_holder_name TEXT NOT NULL," +
+                "account_number TEXT NOT NULL," +
+                "routing_number TEXT NOT NULL," + 
+                "account_type TEXT NOT NULL CHECK(account_type IN ('checking', 'savings'))," + 
+                "nickname TEXT DEFAULT NULL," +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "UNIQUE(user_id, routing_number, account_number)," +
+                "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE);";
+            stmt.execute(createExtAccountTable);
+            System.out.println("External accounts table created successfully");
+
             // Create Transactions Table
             String createTransactionsTable = "CREATE TABLE IF NOT EXISTS transactions (" +
                 "transaction_id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -220,11 +236,70 @@ public class DatabaseManager {
         TransactionDAO.getTransactionsByAccountNumber(johnCheckAcc);
         TransactionDAO.getTransactionsByAccountNumber(bobAcc);
 
+        System.out.println("\n========== EXTERNAL ACCOUNT CHECKS ==========");
+        System.out.println("\n=== 1. LINKING: Adding External Account & Testing Duplicate Guard ===");
+        boolean linked = ExternalAccountDAO.addExternalAccount(
+            johnId, "Chase Bank", "John Doe", "987654321", "021000021", "checking", "My Chase Checking"
+        );
+        System.out.println("External account linked (expected true): " + linked);
+
+        // Attempt to link the exact same routing + account number again
+        boolean duplicateLinked = ExternalAccountDAO.addExternalAccount(
+            johnId, "Chase Bank", "John Doe", "987654321", "021000021", "checking", "Duplicate"
+        );
+        System.out.println("Duplicate link blocked (expected false): " + duplicateLinked);
+
+        // Fetch dynamically to capture the generated external_account_id
+        List<ExternalAccount> extAccounts = ExternalAccountDAO.getExternalAccountsByUserId(johnId);
+        ExternalAccount chaseAcc = extAccounts.get(0);
+        int extId = chaseAcc.getExternalAccountId();
+        System.out.println("Fetched External Account -> ID: " + extId + " | " + chaseAcc.getBankName() +
+                           " (" + chaseAcc.getNickname() + ") #" + chaseAcc.getAccountNumber());
+
+        System.out.println("\n=== 3. IMMEDIATE TRANSFERS: Outgoing & Incoming ===");
+        // Send $200.00 to Chase ($1000.00 -> $800.00)
+        TransactionDAO.transferToExternal(johnCheckAcc, extId, 200.00);
+        double afterOut = BankAccountDAO.getBankAccountsByUsername("john_doe").get(0).getBalance();
+        System.out.println("Balance after sending $200 to external: $" + String.format("%.2f", afterOut));
+
+        // Pull $350.00 from Chase ($800.00 -> $1150.00)
+        TransactionDAO.transferFromExternal(extId, johnCheckAcc, 350.00);
+        double afterIn = BankAccountDAO.getBankAccountsByUsername("john_doe").get(0).getBalance();
+        System.out.println("Balance after pulling $350 from external: $" + String.format("%.2f", afterIn));
+
+        System.out.println("\n=== 4. SCHEDULED EXTERNAL TRANSFER & EDIT/CANCEL GUARDRAIL ===");
+        // Schedule an incoming pull of $150.00 from Chase
+        TransactionDAO.transferFromExternal(extId, johnCheckAcc, 150.00, "2026-12-15 09:00:00");
+
+        double afterSchedule = BankAccountDAO.getBankAccountsByUsername("john_doe").get(0).getBalance();
+        System.out.println("Balance after scheduling (expected unchanged): $" + String.format("%.2f", afterSchedule));
+
+        // Edit the pending external transfer_in (tests the updated EXT- guardrail)
+        Transaction pendingExtTx = TransactionDAO.getPendingTransactionsByAccountNumber(johnCheckAcc).get(0);
+        boolean editWorked = TransactionDAO.editScheduledTransaction(
+            pendingExtTx.getTransactionId(), 225.00, "2026-12-18 10:00:00"
+        );
+        System.out.println("Edited scheduled external transfer_in (expected true): " + editWorked);
+
+        // Cancel the pending external transfer_in
+        boolean cancelWorked = TransactionDAO.cancelScheduledTransaction(pendingExtTx.getTransactionId());
+        System.out.println("Cancelled scheduled external transfer_in (expected true): " + cancelWorked);
+
+        System.out.println("\n=== 5. LEDGER AUDIT ===");
+        for (Transaction tx : TransactionDAO.getTransactionsByAccountNumber(johnCheckAcc)) {
+            System.out.printf("ID: %d | Type: %-12s | Amount: $%-7.2f | Related: %-15s | Status: %-10s%n",
+                tx.getTransactionId(), tx.getTransactionType(), tx.getAmount(),
+                tx.getRelatedAccount(), tx.getStatus());
+        }
+
         System.out.println("=== TEST: Close/deletion tests ===");
         // Test close        
         if (johnCheckAcc != null) {
             BankAccountDAO.closeBankAccount(johnCheckAcc);
         }
+
+        boolean unlinked = ExternalAccountDAO.deleteExternalAccount(extId);
+        System.out.println("External account unlinked (expected true): " + unlinked);
 
         // Test deleting a single bank account
         BankAccountDAO.deleteBankAccount(johnCheckAcc);
