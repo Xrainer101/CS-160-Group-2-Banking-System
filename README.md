@@ -2,16 +2,25 @@
 Software Engineering class project
 
 ## Running the Frontend and Backend for dev
-Run the following commands in the terminal inside the corresponding folder (backend or frontend). You may need to download uv and npm first if you don't have them
+Run the following commands in the terminal inside the corresponding folder (backend or frontend). You may need to download uv, npm, and maven first if you don't have them
 
 **backend**
+
+from root, needed once:  `mvn compile dependency:copy-dependencies -DoutputDirectory=target/dependency`
+
+from root: `cd backend`
 
 `uv run uvicorn main:app --reload --port 8000`
 
 **frontend**   
-`npm install`
+
+from root:  `cd frontend`
+
+needed once:  `npm install` 
 
 `npm run dev`
+
+**Keep both backend and frontend running**
 
 ## Backend tests
 
