@@ -1,5 +1,5 @@
-
 import { useEffect, useRef, useState } from "react";
+
 import {
   BrowserRouter,
   Navigate,
@@ -25,9 +25,11 @@ import Cards from "./pages/Cards";
 import Settings from "./pages/Settings";
 import AdminPanel from "./pages/AdminPanel";
 
-import {
-  initialPayments,
-} from "./data/mockData";
+// New pages
+import ATMFinder from "./pages/ATMFinder";
+import CheckDeposit from "./pages/CheckDeposit";
+
+import { initialPayments } from "./data/mockData";
 
 import {
   clearSession,
@@ -48,17 +50,17 @@ import "./styles/components.css";
 import "./styles/dashboard.css";
 import "./styles/auth.css";
 
-// Basic session display information.
-// This does NOT determine administrator privileges.
 function userFromSession(session) {
   const token = session?.id_token;
+
   if (!token) return null;
 
   try {
-    const encodedPayload = token.split(".")[1];
+    const encoded = token.split(".")[1];
+
     const payload = JSON.parse(
       atob(
-        encodedPayload
+        encoded
           .replace(/-/g, "+")
           .replace(/_/g, "/")
       )
@@ -79,21 +81,19 @@ function userFromSession(session) {
 }
 
 function userFromProfile(profile) {
-  const bankingProfile =
-    profile.banking_user || profile;
+  const p = profile.banking_user || profile;
 
   return {
-    userId: bankingProfile.user_id,
+    userId: p.user_id,
     name:
-      bankingProfile.full_name ||
-      bankingProfile.name ||
-      bankingProfile.username ||
+      p.full_name ||
+      p.name ||
+      p.username ||
       "Banking user",
-    username: bankingProfile.username || "",
-    email: bankingProfile.email || "",
-    role: bankingProfile.role || "customer",
-    isNewUser:
-      bankingProfile.is_new_user === true,
+    username: p.username || "",
+    email: p.email || "",
+    role: p.role || "customer",
+    isNewUser: p.is_new_user === true,
   };
 }
 
@@ -109,57 +109,97 @@ function AppContent() {
   );
 
   const [accounts, setAccounts] = useState([]);
-  const [transactions, setTransactions] =
-    useState([]);
-  const [payments, setPayments] =
-    useState(initialPayments);
+  const [transactions, setTransactions] = useState([]);
+  const [payments, setPayments] = useState(initialPayments);
 
   const [frozen, setFrozen] = useState(false);
   const [notice, setNotice] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+
   const [bankingLoading, setBankingLoading] =
     useState(() => Boolean(session));
+
   const [bankingError, setBankingError] =
     useState("");
 
+  const [openingAccount, setOpeningAccount] =
+    useState(false);
+
+  const [refreshingAccounts, setRefreshingAccounts] =
+    useState(false);
+
+  const [accountRefreshError, setAccountRefreshError] =
+    useState("");
+
+  const openingAccountRef = useRef(false);
   const skipNextSessionLoadRef = useRef(false);
   const sessionVersionRef = useRef(0);
-  const openingAccountRef = useRef(false);
-  const [openingAccount, setOpeningAccount] = useState(false);
-  const [accountRefreshError, setAccountRefreshError] = useState('');
-  const [refreshingAccounts, setRefreshingAccounts] = useState(false);
 
-  async function refreshAccounts(version = sessionVersionRef.current) {
+  const isAdmin = user?.role === "admin";
+
+  function notify(message) {
+    setNotice(message);
+
+    window.setTimeout(() => {
+      setNotice("");
+    }, 4500);
+  }
+
+  async function refreshAccounts(
+    version = sessionVersionRef.current
+  ) {
     if (version !== sessionVersionRef.current) return;
+
     setRefreshingAccounts(true);
+
     try {
       const data = await getAccounts();
+
       if (version !== sessionVersionRef.current) return;
+
       setAccounts(data.accounts || []);
       setTransactions(data.transactions || []);
-      setAccountRefreshError('');
+      setAccountRefreshError("");
     } catch {
       if (version === sessionVersionRef.current) {
-        setAccountRefreshError('Account created, but account data could not refresh. Retry refreshing below.');
+        setAccountRefreshError(
+          "Account data could not refresh. Please retry."
+        );
       }
     } finally {
-      if (version === sessionVersionRef.current) setRefreshingAccounts(false);
+      if (version === sessionVersionRef.current) {
+        setRefreshingAccounts(false);
+      }
     }
   }
 
   async function openAccount(accountType) {
     if (openingAccountRef.current) return false;
+
     const version = sessionVersionRef.current;
+
     openingAccountRef.current = true;
     setOpeningAccount(true);
+
     try {
       await createAccount(accountType);
-      if (version !== sessionVersionRef.current) return false;
-      notify('Your new account was created with a $0.00 balance.');
+
+      if (version !== sessionVersionRef.current) {
+        return false;
+      }
+
+      notify(
+        "Your new account was created with a $0.00 balance."
+      );
+
       await refreshAccounts(version);
+
       return version === sessionVersionRef.current;
     } catch (error) {
-      if (version === sessionVersionRef.current) throw error;
+      if (version === sessionVersionRef.current) {
+        throw error;
+      }
+
       return false;
     } finally {
       openingAccountRef.current = false;
@@ -169,49 +209,95 @@ function AppContent() {
 
   async function handleCloseAccount(accountId) {
     const version = sessionVersionRef.current;
+
     try {
       await closeAccount(accountId);
-      if (version !== sessionVersionRef.current) return false;
-      setAccounts(previous => previous.filter(account => String(account.id) !== String(accountId)));
-      setTransactions(previous => previous.filter(transaction => String(transaction.account) !== String(accountId)));
-      navigate('/accounts', { replace: true });
-      notify('Account closed successfully.');
+
+      if (version !== sessionVersionRef.current) {
+        return false;
+      }
+
+      setAccounts((previous) =>
+        previous.filter(
+          (account) =>
+            String(account.id) !== String(accountId)
+        )
+      );
+
+      setTransactions((previous) =>
+        previous.filter(
+          (transaction) =>
+            String(transaction.account) !== String(accountId)
+        )
+      );
+
+      navigate("/accounts", { replace: true });
+
+      notify("Account closed successfully.");
+
       return true;
     } catch (error) {
-      if (version === sessionVersionRef.current) throw error;
+      if (version === sessionVersionRef.current) {
+        throw error;
+      }
+
       return false;
     }
   }
 
   async function refreshMovement(version) {
     const data = await getAccounts();
-    if (version !== sessionVersionRef.current) return null;
+
+    if (version !== sessionVersionRef.current) {
+      return null;
+    }
+
     setAccounts(data.accounts || []);
     setTransactions(data.transactions || []);
+
     return data.accounts || [];
   }
 
   async function handleMovement(accountId, kind, amount) {
     const version = sessionVersionRef.current;
+
     try {
       await moveAccountMoney(accountId, kind, amount);
     } catch (error) {
-      if (version === sessionVersionRef.current) throw error;
+      if (version === sessionVersionRef.current) {
+        throw error;
+      }
+
       return null;
     }
-    if (version !== sessionVersionRef.current) return null;
+
+    if (version !== sessionVersionRef.current) {
+      return null;
+    }
+
     const refresh = async () => {
-      const accounts = await refreshMovement(version);
-      return accounts?.find(account => String(account.id) === String(accountId)) || null;
+      const updated = await refreshMovement(version);
+
+      return (
+        updated?.find(
+          (account) =>
+            String(account.id) === String(accountId)
+        ) || null
+      );
     };
+
     try {
-      return { account: await refresh(), refresh };
+      return {
+        account: await refresh(),
+        refresh,
+      };
     } catch {
-      return { account: null, refresh };
+      return {
+        account: null,
+        refresh,
+      };
     }
   }
-
-  const isAdmin = user?.role === "admin";
 
   useEffect(() => {
     let cancelled = false;
@@ -232,8 +318,8 @@ function AppContent() {
     async function loadBankingData() {
       setAccounts([]);
       setTransactions([]);
-      setBankingLoading(true);
       setBankingError("");
+      setBankingLoading(true);
 
       try {
         const profile = await getCurrentUser();
@@ -243,16 +329,14 @@ function AppContent() {
 
         setUser(userFromProfile(profile));
         setAccounts(accountData.accounts || []);
-        setTransactions(
-          accountData.transactions || []
-        );
+        setTransactions(accountData.transactions || []);
       } catch (error) {
         if (!cancelled) {
           setAccounts([]);
           setTransactions([]);
+
           setBankingError(
-            error.message ||
-              "Unable to load banking data."
+            error.message || "Unable to load banking data."
           );
         }
       } finally {
@@ -269,20 +353,13 @@ function AppContent() {
     };
   }, [session]);
 
-  function notify(message) {
-    setNotice(message);
-    window.setTimeout(
-      () => setNotice(""),
-      4500
-    );
-  }
-
   async function handleAuthenticated(result) {
     if (!result?.session) return;
 
     sessionVersionRef.current += 1;
-    setAccountRefreshError('');
+    setAccountRefreshError("");
     setRefreshingAccounts(false);
+
     saveSession(result.session);
 
     setAccounts([]);
@@ -296,9 +373,7 @@ function AppContent() {
 
       setUser(userFromProfile(profile));
       setAccounts(accountData.accounts || []);
-      setTransactions(
-        accountData.transactions || []
-      );
+      setTransactions(accountData.transactions || []);
 
       skipNextSessionLoadRef.current = true;
       setSession(result.session);
@@ -306,10 +381,12 @@ function AppContent() {
       navigate("/dashboard");
     } catch (error) {
       clearSession();
+
       setSession(null);
       setUser(null);
       setAccounts([]);
       setTransactions([]);
+
       throw error;
     } finally {
       setBankingLoading(false);
@@ -318,19 +395,22 @@ function AppContent() {
 
   function signOut() {
     sessionVersionRef.current += 1;
-    setAccountRefreshError('');
+
+    setAccountRefreshError("");
     setRefreshingAccounts(false);
+
     clearSession();
+
     setSession(null);
     setUser(null);
-    setMenuOpen(false);
     setAccounts([]);
     setTransactions([]);
+    setMenuOpen(false);
+
     navigate("/signin", { replace: true });
   }
 
-  // Existing demo transfer functionality.
-  // This does not modify actual bank database balances.
+  // Existing local-only demo transfer implementation.
   function transfer(fromId, toId, amount) {
     const from = accounts.find(
       (a) => String(a.id) === String(fromId)
@@ -354,38 +434,35 @@ function AppContent() {
       return "Insufficient available funds.";
     }
 
-    setAccounts((prev) =>
-      prev.map((a) => {
-        if (String(a.id) === String(fromId)) {
+    setAccounts((previous) =>
+      previous.map((account) => {
+        if (String(account.id) === String(fromId)) {
           return {
-            ...a,
-            balance: a.balance - amount,
-            available: a.available - amount,
+            ...account,
+            balance: account.balance - amount,
+            available: account.available - amount,
           };
         }
 
-        if (String(a.id) === String(toId)) {
+        if (String(account.id) === String(toId)) {
           return {
-            ...a,
-            balance: a.balance + amount,
-            available: a.available + amount,
+            ...account,
+            balance: account.balance + amount,
+            available: account.available + amount,
           };
         }
 
-        return a;
+        return account;
       })
     );
 
-    const date = new Date().toLocaleDateString(
-      "en-US",
-      {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }
-    );
+    const date = new Date().toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
 
-    setTransactions((prev) => [
+    setTransactions((previous) => [
       {
         id: Date.now(),
         name: `Transfer to ${to.type}`,
@@ -404,7 +481,7 @@ function AppContent() {
         account: to.id,
         icon: "ArrowLeftRight",
       },
-      ...prev,
+      ...previous,
     ]);
 
     notify(
@@ -415,8 +492,8 @@ function AppContent() {
   }
 
   function schedulePayment(name, amount) {
-    setPayments((prev) => [
-      ...prev,
+    setPayments((previous) => [
+      ...previous,
       {
         id: Date.now(),
         name,
@@ -447,9 +524,7 @@ function AppContent() {
       {user && (
         <Navbar
           user={user}
-          onMenu={() =>
-            setMenuOpen((prev) => !prev)
-          }
+          onMenu={() => setMenuOpen((previous) => !previous)}
           onSignOut={signOut}
         />
       )}
@@ -457,6 +532,7 @@ function AppContent() {
       {notice && (
         <div className="toast" role="status">
           {notice}
+
           <button
             type="button"
             onClick={() => setNotice("")}
@@ -476,11 +552,10 @@ function AppContent() {
       {bankingError && (
         <div className="toast" role="alert">
           {bankingError}
+
           <button
             type="button"
-            onClick={() =>
-              setBankingError("")
-            }
+            onClick={() => setBankingError("")}
             aria-label="Dismiss"
           >
             ×
@@ -493,16 +568,9 @@ function AppContent() {
           path="/signin"
           element={
             user ? (
-              <Navigate
-                to="/dashboard"
-                replace
-              />
+              <Navigate to="/dashboard" replace />
             ) : (
-              <SignIn
-                onAuthenticated={
-                  handleAuthenticated
-                }
-              />
+              <SignIn onAuthenticated={handleAuthenticated} />
             )
           }
         />
@@ -511,16 +579,9 @@ function AppContent() {
           path="/signup"
           element={
             user ? (
-              <Navigate
-                to="/dashboard"
-                replace
-              />
+              <Navigate to="/dashboard" replace />
             ) : (
-              <SignUp
-                onAuthenticated={
-                  handleAuthenticated
-                }
-              />
+              <SignUp onAuthenticated={handleAuthenticated} />
             )
           }
         />
@@ -532,9 +593,7 @@ function AppContent() {
               <div className="app-shell">
                 <Sidebar
                   open={menuOpen}
-                  close={() =>
-                    setMenuOpen(false)
-                  }
+                  close={() => setMenuOpen(false)}
                   isAdmin={isAdmin}
                 />
 
@@ -543,9 +602,7 @@ function AppContent() {
                     <Routes>
                       <Route
                         path="/dashboard"
-                        element={
-                          <Dashboard {...shared} />
-                        }
+                        element={<Dashboard {...shared} />}
                       />
 
                       <Route
@@ -566,48 +623,83 @@ function AppContent() {
 
                       <Route
                         path="/accounts/:accountId"
-                        element={<AccountDetail key={session?.access_token} onCloseAccount={handleCloseAccount} />}
+                        element={
+                          <AccountDetail
+                            key={session?.access_token}
+                            onCloseAccount={handleCloseAccount}
+                          />
+                        }
                       />
 
                       <Route
                         path="/transactions"
-                        element={
-                          <Transactions {...shared} />
-                        }
+                        element={<Transactions {...shared} />}
                       />
 
                       <Route
                         path="/transfers"
-                        element={
-                          <Transfers {...shared} />
-                        }
+                        element={<Transfers {...shared} />}
                       />
 
                       <Route
                         path="/payments"
                         element={<Payments {...shared} />}
                       />
+
                       <Route
                         path="/deposit"
-                        element={<AccountMovement key={session?.access_token + ":deposit"} kind="deposit" accounts={accounts} onMove={handleMovement} />}
+                        element={
+                          <AccountMovement
+                            key={`${session?.access_token}:deposit`}
+                            kind="deposit"
+                            accounts={accounts}
+                            onMove={handleMovement}
+                          />
+                        }
                       />
+
                       <Route
                         path="/withdraw"
-                        element={<AccountMovement key={session?.access_token + ":withdraw"} kind="withdraw" accounts={accounts} onMove={handleMovement} />}
+                        element={
+                          <AccountMovement
+                            key={`${session?.access_token}:withdraw`}
+                            kind="withdraw"
+                            accounts={accounts}
+                            onMove={handleMovement}
+                          />
+                        }
+                      />
+
+                      <Route
+                        path="/atm-finder"
+                        element={<ATMFinder />}
+                      />
+
+                      {/* New camera-based check submission */}
+                      <Route
+                        path="/check-deposit"
+                        element={
+                          <CheckDeposit
+                            key={session?.access_token}
+                            accounts={accounts}
+                          />
+                        }
+                      />
+
+                      {/* New Chase ATM map */}
+                      <Route
+                        path="/atm-finder"
+                        element={<ATMFinder />}
                       />
 
                       <Route
                         path="/cards"
-                        element={
-                          <Cards {...shared} />
-                        }
+                        element={<Cards {...shared} />}
                       />
 
                       <Route
                         path="/settings"
-                        element={
-                          <Settings {...shared} />
-                        }
+                        element={<Settings {...shared} />}
                       />
 
                       <Route
@@ -653,10 +745,7 @@ function AppContent() {
                 </div>
               </div>
             ) : (
-              <Navigate
-                to="/signin"
-                replace
-              />
+              <Navigate to="/signin" replace />
             )
           }
         />

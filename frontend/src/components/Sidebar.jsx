@@ -1,5 +1,5 @@
-
 import { NavLink } from "react-router-dom";
+
 import {
   LayoutDashboard,
   Wallet,
@@ -9,13 +9,10 @@ import {
   ArrowUp,
   ListFilter,
   CreditCard,
-  Settings,
   ShieldCheck,
   ShieldUser,
-  ChartNoAxesCombined,
-  PiggyBank,
-  CalendarRange,
-  Repeat,
+  MapPinned,
+  Camera,
 } from "lucide-react";
 
 const links = [
@@ -25,7 +22,9 @@ const links = [
   ["/transfers", "Transfers", ArrowLeftRight],
   ["/payments", "Pay Bills", DollarSign],
   ["/deposit", "Deposit", ArrowDown],
+  ["/check-deposit", "Mobile Check Deposit", Camera],
   ["/withdraw", "Withdraw", ArrowUp],
+  ["/atm-finder", "Find Chase ATMs", MapPinned],
   ["/cards", "My Cards", CreditCard],
 ];
 
@@ -38,15 +37,21 @@ export default function Sidebar({
     <>
       <div
         className={
-          "sidebar-overlay " + (open ? "show" : "")
+          "sidebar-overlay " +
+          (open ? "show" : "")
         }
         onClick={close}
       />
 
       <aside
-        className={"sidebar " + (open ? "open" : "")}
+        className={
+          "sidebar " +
+          (open ? "open" : "")
+        }
       >
-        <p className="sidebar-label">MAIN MENU</p>
+        <p className="sidebar-label">
+          MAIN MENU
+        </p>
 
         <nav>
           {links.map(([path, label, Icon]) => (
@@ -72,7 +77,11 @@ export default function Sidebar({
           </p>
 
           <NavLink
-            to={isAdmin ? "/admin" : "/admin-preview"}
+            to={
+              isAdmin
+                ? "/admin"
+                : "/admin-preview"
+            }
             onClick={close}
             className={({ isActive }) =>
               "side-link " +
@@ -80,6 +89,7 @@ export default function Sidebar({
             }
           >
             <ShieldUser size={19} />
+
             {isAdmin
               ? "Admin Portal"
               : "Admin Preview"}
