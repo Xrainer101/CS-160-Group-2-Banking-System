@@ -70,32 +70,27 @@ export default function Sidebar({
           ))}
 
           {canViewManagerReports && (
-            <>
-              <p
-                className="sidebar-label"
-                style={{ marginTop: 25 }}
-              >
-                ADMINISTRATION
-              </p>
+              <>
+                <p
+                  className="sidebar-label"
+                  style={{ marginTop: 25 }}
+                >
+                  ADMINISTRATION
+                </p>
 
-          <NavLink
-            to={
-              isAdmin
-                ? "/admin"
-                : "/admin-preview"
-            }
-            onClick={close}
-            className={({ isActive }) =>
-              "side-link " +
-              (isActive ? "active" : "")
-            }
-          >
-            <ShieldUser size={19} />
-
-            {isAdmin
-              ? "Admin Portal"
-              : "Admin Preview"}
-          </NavLink>
+                <NavLink
+                  to="/manager-dashboard"
+                  onClick={close}
+                  className={({ isActive }) =>
+                    "side-link " +
+                    (isActive ? "active" : "")
+                  }
+                >
+                  <ShieldUser size={19} />
+                  Admin Portal
+                </NavLink>
+              </>
+            )}
         </nav>
 
         <div className="sidebar-bottom">
