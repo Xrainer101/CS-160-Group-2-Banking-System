@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Repeat" choice used on the Pay Bills and Transfer screens. RepeatPicker.java runs it.
+     One time / Every week / Every 2 weeks / Every month / Every 3 months / Every year / Custom...
+     Custom shows: Every [N] [days / weeks / months / years] -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/groupRepeatPicker"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        style="@style/FieldLabel"
+        android:text="Repeat" />
+
+    <FrameLayout style="@style/SpinnerBox">
+
+        <Spinner
+            android:id="@+id/spinnerRepeat"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:contentDescription="How often" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:id="@+id/groupCustomRepeat"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/labelRepeatEvery"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="10dp"
+            android:labelFor="@id/editRepeatEvery"
+            android:text="Every"
+            android:textColor="@color/text_dark"
+            android:textSize="15sp" />
+
+        <EditText
+            android:id="@+id/editRepeatEvery"
+            style="@style/FieldInput"
+            android:layout_width="72dp"
+            android:layout_marginEnd="10dp"
+            android:layout_marginBottom="0dp"
+            android:gravity="center"
+            android:hint="#"
+            android:importantForAutofill="no"
+            android:inputType="number"
+            android:maxLength="3"
+            android:text="2" />
+
+        <FrameLayout
+            style="@style/SpinnerBox"
+            android:layout_width="0dp"
+            android:layout_weight="1">
+
+            <Spinner
+                android:id="@+id/spinnerRepeatUnit"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:contentDescription="Days, weeks, months or years" />
+        </FrameLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/textRepeatHint"
+        style="@style/HintText"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="16dp" />
+</LinearLayout>
