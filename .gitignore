@@ -1,3 +1,6 @@
+# --- Android Studio settings ---
+.idea/
+
 # --- VS Code & Java Build Outputs ---
 .vscode/
 bin/
