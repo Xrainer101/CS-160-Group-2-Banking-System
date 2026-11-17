@@ -25,11 +25,11 @@ import Cards from "./pages/Cards";
 import Settings from "./pages/Settings";
 import AdminPanel from "./pages/AdminPanel";
 
-// New pages
-import ATMFinder from "./pages/ATMFinder";
-import CheckDeposit from "./pages/CheckDeposit";
-
-import { initialPayments } from "./data/mockData";
+import {
+  initialAccounts,
+  initialTransactions,
+  initialPayments,
+} from "./data/mockData";
 
 import {
   clearSession,
@@ -50,17 +50,83 @@ import "./styles/components.css";
 import "./styles/dashboard.css";
 import "./styles/auth.css";
 
+// ======================================================
+// OPTIONAL LOCAL PAGES
+// ======================================================
+// Vite includes these modules only when the files exist.
+//
+// devDemo.local.jsx is only used in development.
+// The ATM Finder and Check Deposit pages can also be
+// developed independently without breaking App.jsx.
+
+const localModules = import.meta.glob(
+  [
+    "./devDemo.local.jsx",
+    "./pages/ATMFinder.jsx",
+    "./pages/CheckDeposit.jsx",
+  ],
+  { eager: true }
+);
+
+const DevDemoPage = import.meta.env.DEV
+  ? localModules["./devDemo.local.jsx"]?.default
+  : null;
+
+const ATMFinder =
+  localModules["./pages/ATMFinder.jsx"]?.default;
+
+const CheckDeposit =
+  localModules["./pages/CheckDeposit.jsx"]?.default;
+
+// ======================================================
+// LOCAL DEVELOPMENT DEMO
+// ======================================================
+
+const DEMO_STORAGE_KEY = "team2bank.local.demo";
+
+const DEMO_USER = {
+  userId: "demo",
+  name: "Demo Customer",
+  username: "demo",
+  email: "demo@example.com",
+  role: "customer",
+  isNewUser: false,
+};
+
+function isDemoSession() {
+  return (
+    import.meta.env.DEV &&
+    Boolean(DevDemoPage) &&
+    sessionStorage.getItem(DEMO_STORAGE_KEY) === "true"
+  );
+}
+
+function createDemoAccounts() {
+  return initialAccounts.map((account) => ({
+    ...account,
+    status: "active",
+    account_type:
+      String(account.id) === "savings"
+        ? "savings"
+        : "checking",
+  }));
+}
+
+// ======================================================
+// AUTH0 / USER PROFILE HELPERS
+// ======================================================
+
 function userFromSession(session) {
   const token = session?.id_token;
 
   if (!token) return null;
 
   try {
-    const encoded = token.split(".")[1];
+    const encodedPayload = token.split(".")[1];
 
     const payload = JSON.parse(
       atob(
-        encoded
+        encodedPayload
           .replace(/-/g, "+")
           .replace(/_/g, "/")
       )
@@ -81,43 +147,82 @@ function userFromSession(session) {
 }
 
 function userFromProfile(profile) {
-  const p = profile.banking_user || profile;
+  const bankingProfile =
+    profile.banking_user || profile;
 
   return {
-    userId: p.user_id,
+    userId: bankingProfile.user_id,
     name:
-      p.full_name ||
-      p.name ||
-      p.username ||
+      bankingProfile.full_name ||
+      bankingProfile.name ||
+      bankingProfile.username ||
       "Banking user",
-    username: p.username || "",
-    email: p.email || "",
-    role: p.role || "customer",
-    isNewUser: p.is_new_user === true,
+    username: bankingProfile.username || "",
+    email: bankingProfile.email || "",
+    role: bankingProfile.role || "customer",
+    isNewUser:
+      bankingProfile.is_new_user === true,
   };
 }
 
+// ======================================================
+// MAIN APPLICATION
+// ======================================================
+
 function AppContent() {
   const navigate = useNavigate();
+
+  // ----------------------------------------------------
+  // AUTHENTICATION STATE
+  // ----------------------------------------------------
+
+  const [demoMode, setDemoMode] = useState(
+    () => isDemoSession()
+  );
 
   const [session, setSession] = useState(
     () => getSession()
   );
 
-  const [user, setUser] = useState(
-    () => userFromSession(session)
+  const [user, setUser] = useState(() =>
+    isDemoSession()
+      ? DEMO_USER
+      : userFromSession(getSession())
   );
 
-  const [accounts, setAccounts] = useState([]);
-  const [transactions, setTransactions] = useState([]);
-  const [payments, setPayments] = useState(initialPayments);
+  // ----------------------------------------------------
+  // BANKING DATA
+  // ----------------------------------------------------
+
+  const [accounts, setAccounts] = useState(() =>
+    isDemoSession()
+      ? createDemoAccounts()
+      : []
+  );
+
+  const [transactions, setTransactions] =
+    useState(() =>
+      isDemoSession()
+        ? [...initialTransactions]
+        : []
+    );
+
+  const [payments, setPayments] =
+    useState(() => [...initialPayments]);
 
   const [frozen, setFrozen] = useState(false);
+
+  // ----------------------------------------------------
+  // UI STATE
+  // ----------------------------------------------------
+
   const [notice, setNotice] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
 
   const [bankingLoading, setBankingLoading] =
-    useState(() => Boolean(session));
+    useState(() =>
+      !isDemoSession() && Boolean(getSession())
+    );
 
   const [bankingError, setBankingError] =
     useState("");
@@ -125,17 +230,26 @@ function AppContent() {
   const [openingAccount, setOpeningAccount] =
     useState(false);
 
-  const [refreshingAccounts, setRefreshingAccounts] =
-    useState(false);
+  const [
+    accountRefreshError,
+    setAccountRefreshError,
+  ] = useState("");
 
-  const [accountRefreshError, setAccountRefreshError] =
-    useState("");
+  const [
+    refreshingAccounts,
+    setRefreshingAccounts,
+  ] = useState(false);
 
-  const openingAccountRef = useRef(false);
   const skipNextSessionLoadRef = useRef(false);
   const sessionVersionRef = useRef(0);
+  const openingAccountRef = useRef(false);
 
-  const isAdmin = user?.role === "admin";
+  const isAdmin =
+    !demoMode && user?.role === "admin";
+
+  // ====================================================
+  // NOTIFICATIONS
+  // ====================================================
 
   function notify(message) {
     setNotice(message);
@@ -145,20 +259,73 @@ function AppContent() {
     }, 4500);
   }
 
+  // ====================================================
+  // LOCAL DEMO LOGIN
+  // ====================================================
+
+  function enterDemo() {
+    if (!import.meta.env.DEV || !DevDemoPage) {
+      return;
+    }
+
+    sessionVersionRef.current += 1;
+
+    // Demo mode never creates an Auth0 session.
+    clearSession();
+    setSession(null);
+
+    sessionStorage.setItem(
+      DEMO_STORAGE_KEY,
+      "true"
+    );
+
+    setDemoMode(true);
+    setUser(DEMO_USER);
+
+    setAccounts(createDemoAccounts());
+    setTransactions([...initialTransactions]);
+    setPayments([...initialPayments]);
+
+    setFrozen(false);
+    setBankingLoading(false);
+    setBankingError("");
+
+    setAccountRefreshError("");
+    setRefreshingAccounts(false);
+
+    navigate("/dashboard", {
+      replace: true,
+    });
+  }
+
+  // ====================================================
+  // REFRESH ACCOUNT DATA
+  // ====================================================
+
   async function refreshAccounts(
     version = sessionVersionRef.current
   ) {
-    if (version !== sessionVersionRef.current) return;
+    if (version !== sessionVersionRef.current) {
+      return;
+    }
+
+    if (demoMode) {
+      setAccountRefreshError("");
+      return;
+    }
 
     setRefreshingAccounts(true);
 
     try {
       const data = await getAccounts();
 
-      if (version !== sessionVersionRef.current) return;
+      if (version !== sessionVersionRef.current) {
+        return;
+      }
 
       setAccounts(data.accounts || []);
       setTransactions(data.transactions || []);
+
       setAccountRefreshError("");
     } catch {
       if (version === sessionVersionRef.current) {
@@ -173,8 +340,45 @@ function AppContent() {
     }
   }
 
+  // ====================================================
+  // OPEN ACCOUNT
+  // ====================================================
+
   async function openAccount(accountType) {
-    if (openingAccountRef.current) return false;
+    // Local demo account creation.
+    if (demoMode) {
+      const id = `demo-${Date.now()}`;
+
+      const isSavings =
+        accountType === "savings";
+
+      setAccounts((previous) => [
+        ...previous,
+        {
+          id,
+          type: isSavings
+            ? "High-Yield Savings"
+            : "Everyday Checking",
+          account_type: accountType,
+          number: "•••• DEMO",
+          balance: 0,
+          available: 0,
+          color: isSavings ? "purple" : "blue",
+          status: "active",
+        },
+      ]);
+
+      notify(
+        "Demo account created. No real account was opened."
+      );
+
+      return true;
+    }
+
+    // Existing authenticated backend flow.
+    if (openingAccountRef.current) {
+      return false;
+    }
 
     const version = sessionVersionRef.current;
 
@@ -207,7 +411,50 @@ function AppContent() {
     }
   }
 
+  // ====================================================
+  // CLOSE ACCOUNT
+  // ====================================================
+
   async function handleCloseAccount(accountId) {
+    if (demoMode) {
+      const account = accounts.find(
+        (item) =>
+          String(item.id) === String(accountId)
+      );
+
+      if (!account) {
+        throw new Error("Account not found.");
+      }
+
+      if (account.balance !== 0) {
+        throw new Error(
+          "Move your demo funds before closing this account."
+        );
+      }
+
+      setAccounts((previous) =>
+        previous.filter(
+          (item) =>
+            String(item.id) !== String(accountId)
+        )
+      );
+
+      setTransactions((previous) =>
+        previous.filter(
+          (item) =>
+            String(item.account) !== String(accountId)
+        )
+      );
+
+      navigate("/accounts", {
+        replace: true,
+      });
+
+      notify("Demo account closed.");
+
+      return true;
+    }
+
     const version = sessionVersionRef.current;
 
     try {
@@ -227,11 +474,14 @@ function AppContent() {
       setTransactions((previous) =>
         previous.filter(
           (transaction) =>
-            String(transaction.account) !== String(accountId)
+            String(transaction.account) !==
+            String(accountId)
         )
       );
 
-      navigate("/accounts", { replace: true });
+      navigate("/accounts", {
+        replace: true,
+      });
 
       notify("Account closed successfully.");
 
@@ -245,7 +495,15 @@ function AppContent() {
     }
   }
 
+  // ====================================================
+  // REFRESH AFTER DEPOSIT OR WITHDRAWAL
+  // ====================================================
+
   async function refreshMovement(version) {
+    if (demoMode) {
+      return accounts;
+    }
+
     const data = await getAccounts();
 
     if (version !== sessionVersionRef.current) {
@@ -258,11 +516,119 @@ function AppContent() {
     return data.accounts || [];
   }
 
-  async function handleMovement(accountId, kind, amount) {
+  // ====================================================
+  // DEPOSIT / WITHDRAW
+  // ====================================================
+
+  async function handleMovement(
+    accountId,
+    kind,
+    amount
+  ) {
+    if (demoMode) {
+      const value = Number(amount);
+
+      if (
+        !Number.isFinite(value) ||
+        value <= 0 ||
+        !/^\d+(?:\.\d{1,2})?$/.test(String(amount))
+      ) {
+        throw new Error("Invalid amount.");
+      }
+
+      const account = accounts.find(
+        (item) =>
+          String(item.id) === String(accountId)
+      );
+
+      if (!account) {
+        throw new Error("Account not found.");
+      }
+
+      if (
+        kind === "withdraw" &&
+        value > account.available
+      ) {
+        throw new Error(
+          "Insufficient available funds."
+        );
+      }
+
+      const adjustment =
+        kind === "deposit"
+          ? value
+          : -value;
+
+      const updatedAccount = {
+        ...account,
+        balance:
+          Math.round(
+            (account.balance + adjustment) * 100
+          ) / 100,
+        available:
+          Math.round(
+            (account.available + adjustment) * 100
+          ) / 100,
+      };
+
+      setAccounts((previous) =>
+        previous.map((item) =>
+          String(item.id) === String(accountId)
+            ? updatedAccount
+            : item
+        )
+      );
+
+      const date = new Date().toLocaleDateString(
+        "en-US",
+        {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        }
+      );
+
+      setTransactions((previous) => [
+        {
+          id: Date.now(),
+          name:
+            kind === "deposit"
+              ? "Demo Deposit"
+              : "Demo Withdrawal",
+          category:
+            kind === "deposit"
+              ? "Income"
+              : "Expense",
+          date,
+          amount: adjustment,
+          account: accountId,
+          icon:
+            kind === "deposit"
+              ? "ArrowDownLeft"
+              : "CircleDollarSign",
+        },
+        ...previous,
+      ]);
+
+      notify(
+        "Demo transaction completed. No real funds were moved."
+      );
+
+      return {
+        account: updatedAccount,
+        refresh: async () => updatedAccount,
+      };
+    }
+
+    // Existing authenticated backend flow.
     const version = sessionVersionRef.current;
 
     try {
-      await moveAccountMoney(accountId, kind, amount);
+      await moveAccountMoney(
+        accountId,
+        kind,
+        amount
+      );
     } catch (error) {
       if (version === sessionVersionRef.current) {
         throw error;
@@ -281,7 +647,8 @@ function AppContent() {
       return (
         updated?.find(
           (account) =>
-            String(account.id) === String(accountId)
+            String(account.id) ===
+            String(accountId)
         ) || null
       );
     };
@@ -299,8 +666,20 @@ function AppContent() {
     }
   }
 
+  // ====================================================
+  // LOAD AUTH0 BANKING DATA
+  // ====================================================
+
   useEffect(() => {
     let cancelled = false;
+
+    // Never request protected banking data
+    // while using the local demo account.
+    if (demoMode) {
+      setBankingLoading(false);
+      setBankingError("");
+      return;
+    }
 
     if (!session) {
       setAccounts([]);
@@ -318,8 +697,8 @@ function AppContent() {
     async function loadBankingData() {
       setAccounts([]);
       setTransactions([]);
-      setBankingError("");
       setBankingLoading(true);
+      setBankingError("");
 
       try {
         const profile = await getCurrentUser();
@@ -328,15 +707,20 @@ function AppContent() {
         if (cancelled) return;
 
         setUser(userFromProfile(profile));
+
         setAccounts(accountData.accounts || []);
-        setTransactions(accountData.transactions || []);
+
+        setTransactions(
+          accountData.transactions || []
+        );
       } catch (error) {
         if (!cancelled) {
           setAccounts([]);
           setTransactions([]);
 
           setBankingError(
-            error.message || "Unable to load banking data."
+            error.message ||
+              "Unable to load banking data."
           );
         }
       } finally {
@@ -351,12 +735,20 @@ function AppContent() {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, demoMode]);
+
+  // ====================================================
+  // AUTH0 LOGIN CALLBACK
+  // ====================================================
 
   async function handleAuthenticated(result) {
     if (!result?.session) return;
 
     sessionVersionRef.current += 1;
+
+    sessionStorage.removeItem(DEMO_STORAGE_KEY);
+    setDemoMode(false);
+
     setAccountRefreshError("");
     setRefreshingAccounts(false);
 
@@ -372,8 +764,12 @@ function AppContent() {
       const accountData = await getAccounts();
 
       setUser(userFromProfile(profile));
+
       setAccounts(accountData.accounts || []);
-      setTransactions(accountData.transactions || []);
+
+      setTransactions(
+        accountData.transactions || []
+      );
 
       skipNextSessionLoadRef.current = true;
       setSession(result.session);
@@ -393,9 +789,16 @@ function AppContent() {
     }
   }
 
+  // ====================================================
+  // SIGN OUT
+  // ====================================================
+
   function signOut() {
     sessionVersionRef.current += 1;
 
+    sessionStorage.removeItem(DEMO_STORAGE_KEY);
+
+    setDemoMode(false);
     setAccountRefreshError("");
     setRefreshingAccounts(false);
 
@@ -403,21 +806,39 @@ function AppContent() {
 
     setSession(null);
     setUser(null);
-    setAccounts([]);
-    setTransactions([]);
     setMenuOpen(false);
 
-    navigate("/signin", { replace: true });
+    setAccounts([]);
+    setTransactions([]);
+    setPayments([...initialPayments]);
+
+    setBankingError("");
+    setBankingLoading(false);
+
+    if (import.meta.env.DEV && DevDemoPage) {
+      navigate("/dev-demo", {
+        replace: true,
+      });
+    } else {
+      navigate("/signin", {
+        replace: true,
+      });
+    }
   }
 
-  // Existing local-only demo transfer implementation.
+  // ====================================================
+  // TRANSFERS
+  // ====================================================
+
   function transfer(fromId, toId, amount) {
     const from = accounts.find(
-      (a) => String(a.id) === String(fromId)
+      (account) =>
+        String(account.id) === String(fromId)
     );
 
     const to = accounts.find(
-      (a) => String(a.id) === String(toId)
+      (account) =>
+        String(account.id) === String(toId)
     );
 
     if (
@@ -456,11 +877,14 @@ function AppContent() {
       })
     );
 
-    const date = new Date().toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
+    const date = new Date().toLocaleDateString(
+      "en-US",
+      {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }
+    );
 
     setTransactions((previous) => [
       {
@@ -491,46 +915,124 @@ function AppContent() {
     return "";
   }
 
-  function schedulePayment(name, amount) {
+  // ====================================================
+  // BILL PAY - UPDATED
+  // ====================================================
+  // Supports:
+  // - One-time payments
+  // - Recurring payment labels
+  // - Funding account
+  // - Payment date
+  // - Category
+  // - Memo
+  // - Cancellation
+  //
+  // This is frontend-only demo functionality.
+  // It does not debit an account or call a bill-pay API.
+
+  function schedulePayment(
+    name,
+    amount,
+    details = {}
+  ) {
+    const newPayment = {
+      id:
+        typeof crypto !== "undefined" &&
+        typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `payment-${Date.now()}-${Math.random()}`,
+
+      name,
+      amount: Number(amount),
+
+      date:
+        details.paymentDate || "Scheduled",
+
+      paymentDate:
+        details.paymentDate || null,
+
+      category:
+        details.category || "Other",
+
+      accountId:
+        details.accountId || null,
+
+      frequency:
+        details.frequency || "once",
+
+      memo:
+        details.memo || "",
+
+      status: "scheduled",
+    };
+
     setPayments((previous) => [
       ...previous,
-      {
-        id: Date.now(),
-        name,
-        amount,
-        date: "Scheduled",
-      },
+      newPayment,
     ]);
 
     notify(
-      "Demo payment added to upcoming payments."
+      "Demo bill payment scheduled successfully."
+    );
+
+    return newPayment;
+  }
+
+  function cancelPayment(paymentId) {
+    setPayments((previous) =>
+      previous.filter(
+        (payment) =>
+          String(payment.id) !==
+          String(paymentId)
+      )
+    );
+
+    notify(
+      "Demo scheduled payment cancelled."
     );
   }
+
+  // ====================================================
+  // SHARED PROPS
+  // ====================================================
 
   const shared = {
     user,
     accounts,
     transactions,
     payments,
+
     frozen,
     setFrozen,
+
     notify,
     transfer,
+
     schedulePayment,
+    cancelPayment,
   };
+
+  // ====================================================
+  // APPLICATION ROUTES
+  // ====================================================
 
   return (
     <>
       {user && (
         <Navbar
           user={user}
-          onMenu={() => setMenuOpen((previous) => !previous)}
+          onMenu={() =>
+            setMenuOpen((previous) => !previous)
+          }
           onSignOut={signOut}
         />
       )}
 
       {notice && (
-        <div className="toast" role="status">
+        <div
+          className="toast"
+          role="status"
+        >
           {notice}
 
           <button
@@ -544,18 +1046,26 @@ function AppContent() {
       )}
 
       {bankingLoading && (
-        <div className="toast" role="status">
+        <div
+          className="toast"
+          role="status"
+        >
           Loading your banking data...
         </div>
       )}
 
       {bankingError && (
-        <div className="toast" role="alert">
+        <div
+          className="toast"
+          role="alert"
+        >
           {bankingError}
 
           <button
             type="button"
-            onClick={() => setBankingError("")}
+            onClick={() =>
+              setBankingError("")
+            }
             aria-label="Dismiss"
           >
             ×
@@ -564,27 +1074,75 @@ function AppContent() {
       )}
 
       <Routes>
+        {/* ===================================== */}
+        {/* LOCAL DEMO LOGIN                      */}
+        {/* ===================================== */}
+
+        {import.meta.env.DEV && DevDemoPage && (
+          <Route
+            path="/dev-demo"
+            element={
+              user ? (
+                <Navigate
+                  to="/dashboard"
+                  replace
+                />
+              ) : (
+                <DevDemoPage
+                  onEnter={enterDemo}
+                />
+              )
+            }
+          />
+        )}
+
+        {/* ===================================== */}
+        {/* AUTH0 SIGN IN                         */}
+        {/* ===================================== */}
+
         <Route
           path="/signin"
           element={
             user ? (
-              <Navigate to="/dashboard" replace />
+              <Navigate
+                to="/dashboard"
+                replace
+              />
             ) : (
-              <SignIn onAuthenticated={handleAuthenticated} />
+              <SignIn
+                onAuthenticated={
+                  handleAuthenticated
+                }
+              />
             )
           }
         />
+
+        {/* ===================================== */}
+        {/* AUTH0 SIGN UP                         */}
+        {/* ===================================== */}
 
         <Route
           path="/signup"
           element={
             user ? (
-              <Navigate to="/dashboard" replace />
+              <Navigate
+                to="/dashboard"
+                replace
+              />
             ) : (
-              <SignUp onAuthenticated={handleAuthenticated} />
+              <SignUp
+                onAuthenticated={
+                  handleAuthenticated
+                }
+              />
             )
           }
         />
+
+        {/* ===================================== */}
+        {/* BANKING APPLICATION                   */}
+        {/* ===================================== */}
 
         <Route
           path="/*"
@@ -593,114 +1151,214 @@ function AppContent() {
               <div className="app-shell">
                 <Sidebar
                   open={menuOpen}
-                  close={() => setMenuOpen(false)}
+                  close={() =>
+                    setMenuOpen(false)
+                  }
                   isAdmin={isAdmin}
                 />
 
                 <div className="app-content">
                   <main className="main-content">
                     <Routes>
+                      {/* DASHBOARD */}
+
                       <Route
                         path="/dashboard"
-                        element={<Dashboard {...shared} />}
+                        element={
+                          <Dashboard
+                            {...shared}
+                          />
+                        }
                       />
+
+                      {/* ACCOUNTS */}
 
                       <Route
                         path="/accounts"
                         element={
                           <Accounts
                             {...shared}
-                            bankingLoading={bankingLoading}
-                            bankingError={bankingError}
-                            onOpenAccount={openAccount}
-                            openingAccount={openingAccount}
-                            accountRefreshError={accountRefreshError}
-                            refreshingAccounts={refreshingAccounts}
-                            onRefreshAccounts={() => refreshAccounts()}
+                            bankingLoading={
+                              bankingLoading
+                            }
+                            bankingError={
+                              bankingError
+                            }
+                            onOpenAccount={
+                              openAccount
+                            }
+                            openingAccount={
+                              openingAccount
+                            }
+                            accountRefreshError={
+                              accountRefreshError
+                            }
+                            refreshingAccounts={
+                              refreshingAccounts
+                            }
+                            onRefreshAccounts={() =>
+                              refreshAccounts()
+                            }
                           />
                         }
                       />
+
+                      {/* ACCOUNT DETAILS */}
 
                       <Route
                         path="/accounts/:accountId"
                         element={
-                          <AccountDetail
-                            key={session?.access_token}
-                            onCloseAccount={handleCloseAccount}
+                          demoMode ? (
+                            <Navigate
+                              to="/accounts"
+                              replace
+                            />
+                          ) : (
+                            <AccountDetail
+                              key={
+                                session?.access_token
+                              }
+                              onCloseAccount={
+                                handleCloseAccount
+                              }
+                            />
+                          )
+                        }
+                      />
+
+                      {/* TRANSACTIONS */}
+
+                      <Route
+                        path="/transactions"
+                        element={
+                          <Transactions
+                            {...shared}
                           />
                         }
                       />
 
-                      <Route
-                        path="/transactions"
-                        element={<Transactions {...shared} />}
-                      />
+                      {/* TRANSFERS */}
 
                       <Route
                         path="/transfers"
-                        element={<Transfers {...shared} />}
+                        element={
+                          <Transfers
+                            {...shared}
+                          />
+                        }
                       />
+
+                      {/* PAY BILLS - UPDATED */}
 
                       <Route
                         path="/payments"
-                        element={<Payments {...shared} />}
+                        element={
+                          <Payments
+                            {...shared}
+                          />
+                        }
                       />
+
+                      {/* DEPOSIT */}
 
                       <Route
                         path="/deposit"
                         element={
                           <AccountMovement
-                            key={`${session?.access_token}:deposit`}
                             kind="deposit"
                             accounts={accounts}
-                            onMove={handleMovement}
+                            onMove={
+                              handleMovement
+                            }
                           />
                         }
                       />
+
+                      {/* WITHDRAW */}
 
                       <Route
                         path="/withdraw"
                         element={
                           <AccountMovement
-                            key={`${session?.access_token}:withdraw`}
                             kind="withdraw"
                             accounts={accounts}
-                            onMove={handleMovement}
+                            onMove={
+                              handleMovement
+                            }
                           />
                         }
                       />
 
-                      <Route
-                        path="/atm-finder"
-                        element={<ATMFinder />}
-                      />
+                      {/* ATM FINDER */}
 
-                      {/* New camera-based check submission */}
-                      <Route
-                        path="/check-deposit"
-                        element={
-                          <CheckDeposit
-                            key={session?.access_token}
-                            accounts={accounts}
-                          />
-                        }
-                      />
+                      {ATMFinder && (
+                        <Route
+                          path="/atm-finder"
+                          element={
+                            <ATMFinder />
+                          }
+                        />
+                      )}
 
-                      {/* New Chase ATM map */}
-                      <Route
-                        path="/atm-finder"
-                        element={<ATMFinder />}
-                      />
+                      {/* MOBILE CHECK DEPOSIT */}
+
+                      {CheckDeposit && (
+                        <Route
+                          path="/check-deposit"
+                          element={
+                            demoMode ? (
+                              <section className="panel">
+                                <h2>
+                                  Mobile Check Deposit
+                                </h2>
+
+                                <p>
+                                  This feature
+                                  requires Auth0
+                                  authentication
+                                  to submit
+                                  simulated checks.
+                                </p>
+
+                                <p>
+                                  Demo mode
+                                  does not upload
+                                  check photos
+                                  or credit funds.
+                                </p>
+                              </section>
+                            ) : (
+                              <CheckDeposit
+                                accounts={accounts}
+                              />
+                            )
+                          }
+                        />
+                      )}
+
+                      {/* CARDS */}
 
                       <Route
                         path="/cards"
-                        element={<Cards {...shared} />}
+                        element={
+                          <Cards
+                            {...shared}
+                          />
+                        }
                       />
+
+                      {/* SETTINGS */}
 
                       <Route
                         path="/settings"
-                        element={<Settings {...shared} />}
+                        element={
+                          <Settings
+                            {...shared}
+                          />
+                        }
                       />
+
+                      {/* ADMIN PREVIEW */}
 
                       <Route
                         path="/admin-preview"
@@ -711,6 +1369,8 @@ function AppContent() {
                           />
                         }
                       />
+
+                      {/* ADMIN PORTAL */}
 
                       <Route
                         path="/admin"
@@ -729,6 +1389,8 @@ function AppContent() {
                         }
                       />
 
+                      {/* DEFAULT ROUTE */}
+
                       <Route
                         path="*"
                         element={
@@ -745,7 +1407,10 @@ function AppContent() {
                 </div>
               </div>
             ) : (
-              <Navigate to="/signin" replace />
+              <Navigate
+                to="/signin"
+                replace
+              />
             )
           }
         />
@@ -753,6 +1418,10 @@ function AppContent() {
     </>
   );
 }
+
+// ======================================================
+// ROOT APP
+// ======================================================
 
 export default function App() {
   return (
