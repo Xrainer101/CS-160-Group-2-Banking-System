@@ -6,15 +6,24 @@ public class Transaction {
     private String transactionType;
     private double amount;
     private String relatedAccount;
+    private String status;
+    private int recurrenceInterval;
+    private String recurrenceUnit;
+    private String scheduledFor;
     private String timestamp;
 
     // Constructor
-    public Transaction(int transactionId, String accountNumber, String transactionType, double amount, String relatedAccount, String timestamp) {
+    public Transaction(int transactionId, String accountNumber, String transactionType, double amount, String relatedAccount, String status, int recurrenceInterval,
+                       String recurrenceUnit, String scheduledFor, String timestamp) {
         this.transactionId = transactionId;
         this.accountNumber = accountNumber;
         this.transactionType = transactionType;
         this.amount = amount;
         this.relatedAccount = relatedAccount;
+        this.status = status;
+        this.recurrenceInterval = recurrenceInterval;
+        this.recurrenceUnit = recurrenceUnit;
+        this.scheduledFor = scheduledFor;
         this.timestamp = timestamp;
     }
 
@@ -24,5 +33,9 @@ public class Transaction {
     public String getTransactionType() { return transactionType; }
     public double getAmount() { return amount; }
     public String getRelatedAccount() { return relatedAccount; }
+    public String getStatus() { return status; }
+    public int getRecurrenceInterval() { return recurrenceInterval; }
+    public String getRecurrenceUnit() { return recurrenceUnit; }
+    public String getScheduledFor() { return scheduledFor; }
     public String getTimestamp() { return timestamp; }
 }

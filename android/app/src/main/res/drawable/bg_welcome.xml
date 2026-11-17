@@ -6,4 +6,4 @@
         android:angle="270"
         android:endColor="@color/page_bg"
         android:startColor="@color/welcome_bg_top" />
-</shape>
+</shape>

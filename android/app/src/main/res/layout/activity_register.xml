@@ -164,7 +164,15 @@
                 android:autofillHints="newPassword"
                 android:hint="At least 8 characters"
                 android:inputType="textPassword" />
-
+            <!-- Password requirements checklist -->
+            <TextView
+                android:id="@+id/textPasswordRequirements"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="☐ At least 8 characters\n☐ One uppercase letter\n☐ One lowercase letter\n☐ One number\n☐ One symbol"
+                android:textColor="@color/text_muted"
+                android:textSize="12sp" />
             <TextView
                 style="@style/FieldLabel"
                 android:labelFor="@id/editConfirmPassword"

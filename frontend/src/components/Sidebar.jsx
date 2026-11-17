@@ -1,30 +1,58 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink } from "react-router-dom";
+
 import {
   LayoutDashboard,
   Wallet,
   ArrowLeftRight,
-  ReceiptText,
+  DollarSign,
+  ArrowDown,
+  ArrowUp,
+  ListFilter,
   CreditCard,
-  Settings,
   ShieldCheck,
-} from 'lucide-react';
+  ShieldUser,
+  MapPinned,
+  Camera,
+} from "lucide-react";
+
 const links = [
-  ['/dashboard', 'Overview', LayoutDashboard],
-  ['/accounts', 'My Accounts', Wallet],
-  ['/transactions', 'Transactions', ReceiptText],
-  ['/transfers', 'Transfers & Payments', ArrowLeftRight],
-  ['/cards', 'My Cards', CreditCard],
-  ['/settings', 'Settings', Settings],
+  ["/dashboard", "Overview", LayoutDashboard],
+  ["/accounts", "My Accounts", Wallet],
+  ["/transactions", "Transactions", ListFilter],
+  ["/transfers", "Transfers", ArrowLeftRight],
+  ["/payments", "Pay Bills", DollarSign],
+  ["/deposit", "Deposit", ArrowDown],
+  ["/check-deposit", "Mobile Check Deposit", Camera],
+  ["/withdraw", "Withdraw", ArrowUp],
+  ["/atm-finder", "Find Chase ATMs", MapPinned],
+  ["/cards", "My Cards", CreditCard],
 ];
-export default function Sidebar({ open, close }) {
+
+export default function Sidebar({
+  open,
+  close,
+  canViewManagerReports = false,
+}) {
   return (
     <>
       <div
-        className={'sidebar-overlay ' + (open ? 'show' : '')}
+        className={
+          "sidebar-overlay " +
+          (open ? "show" : "")
+        }
         onClick={close}
-      ></div>
-      <aside className={'sidebar ' + (open ? 'open' : '')}>
-        <p className="sidebar-label">MAIN MENU</p>
+      />
+
+      <aside
+        className={
+          "sidebar " +
+          (open ? "open" : "")
+        }
+      >
+        <p className="sidebar-label">
+          MAIN MENU
+        </p>
+
         <nav>
           {links.map(([path, label, Icon]) => (
             <NavLink
@@ -32,19 +60,46 @@ export default function Sidebar({ open, close }) {
               to={path}
               onClick={close}
               className={({ isActive }) =>
-                'side-link ' + (isActive ? 'active' : '')
+                "side-link " +
+                (isActive ? "active" : "")
               }
             >
               <Icon size={19} />
               {label}
             </NavLink>
           ))}
+
+          {canViewManagerReports && (
+              <>
+                <p
+                  className="sidebar-label"
+                  style={{ marginTop: 25 }}
+                >
+                  ADMINISTRATION
+                </p>
+
+                <NavLink
+                  to="/manager-dashboard"
+                  onClick={close}
+                  className={({ isActive }) =>
+                    "side-link " +
+                    (isActive ? "active" : "")
+                  }
+                >
+                  <ShieldUser size={19} />
+                  Admin Portal
+                </NavLink>
+              </>
+            )}
         </nav>
+
         <div className="sidebar-bottom">
           <ShieldCheck size={20} />
           <div>
             <strong>Secure demo</strong>
-            <small>Simulated banking experience</small>
+            <small>
+              Academic banking application
+            </small>
           </div>
         </div>
       </aside>

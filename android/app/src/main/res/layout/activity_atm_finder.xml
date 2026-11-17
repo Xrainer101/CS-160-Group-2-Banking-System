@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ATM finder: opens Google Maps searching for a bank's ATMs near you or near a place -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/white"
+    android:orientation="vertical">
+
+    <include layout="@layout/view_screen_header" />
+
+    <ScrollView
+        android:id="@+id/scrollContent"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/page_bg"
+        android:clipToPadding="false"
+        android:fillViewport="true"
+        android:paddingBottom="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                style="@style/SectionLabel"
+                android:layout_marginTop="8dp"
+                android:text="ATM FINDER" />
+
+            <TextView
+                style="@style/SectionTitle"
+                android:text="Find an ATM"
+                android:textSize="24sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Enter where you are and we'll open Google Maps with the Chase ATMs near that address, with directions and opening hours."
+                android:textColor="@color/text_gray"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="22dp">
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:labelFor="@id/editAddress"
+                    android:text="Your address" />
+
+                <EditText
+                    android:id="@+id/editAddress"
+                    style="@style/FieldInput"
+                    android:autofillHints="postalAddress"
+                    android:hint="Street address, city or ZIP code"
+                    android:imeOptions="actionSearch"
+                    android:inputType="textPostalAddress"
+                    android:maxLength="120" />
+
+                <TextView
+                    style="@style/HintText"
+                    android:layout_marginTop="-8dp"
+                    android:layout_marginBottom="16dp"
+                    android:text="For example: 1 Washington Sq, San Jose, CA 95192" />
+
+                <Button
+                    android:id="@+id/buttonFindAtms"
+                    style="@style/PrimaryButton"
+                    android:text="Find ATMs nearby" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

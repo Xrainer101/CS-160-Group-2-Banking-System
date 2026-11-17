@@ -1,3 +1,6 @@
+# --- Android Studio settings ---
+.idea/
+
 # --- VS Code & Java Build Outputs ---
 .vscode/
 bin/
@@ -10,3 +13,7 @@ target/
 *.sqlite3
 *.db-journal
 *.db-wal
+
+# --- Secret Files ---
+.env
+frontend/.env.local

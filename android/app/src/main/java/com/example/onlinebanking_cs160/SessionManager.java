@@ -9,6 +9,7 @@ public class SessionManager {
     private static final String KEY_USER_ID = "user_id";
     private static final String KEY_PREVIOUS_LOGIN = "previous_login";
     private static final String KEY_TOKEN = "access_token";
+    private static final String KEY_DISPLAY_NAME = "display_name";
 
     private final SharedPreferences prefs;
 
@@ -22,7 +23,7 @@ public class SessionManager {
 
     // checks whether a backend authentication token is saved
     public boolean isLoggedIn() {
-        return getToken() != null;
+        return getToken() != null && getUserId() > 0 && prefs.getBoolean("local_auth0_session", false);
     }
 
     // logged in user's id, or -1 if nobody is logged in
@@ -47,5 +48,34 @@ public class SessionManager {
     // returns the backend token or null if nobody is logged in
     public String getToken() {
         return prefs.getString(KEY_TOKEN, null);
+    }
+
+    // saves the backend token and the user's display name
+    public void login(String token, String displayName) {
+        prefs.edit().putString(KEY_TOKEN,token).putString(KEY_DISPLAY_NAME,displayName).apply();
+    }
+
+    // Saves the Auth0 token together with the backend banking user.
+    public void login(String token, long userId, String displayName) {
+        prefs.edit()
+            .putString(KEY_TOKEN, token)
+            .putLong(KEY_USER_ID, userId)
+            .putString(KEY_DISPLAY_NAME, displayName)
+            .apply();
+    }
+
+    public void login(String token, long localUserId, String displayName, long previousLogin) {
+        prefs.edit().clear()
+                .putString(KEY_TOKEN, token)
+                .putLong(KEY_USER_ID, localUserId)
+                .putString(KEY_DISPLAY_NAME, displayName)
+                .putLong(KEY_PREVIOUS_LOGIN, previousLogin)
+                .putBoolean("local_auth0_session", true)
+                .apply();
+    }
+
+    // returns the display name of the logged in user
+    public String getDisplayName() {
+        return prefs.getString(KEY_DISPLAY_NAME, " ");
     }
 }

@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Schedule a bill, edit a scheduled bill or transfer, and see upcoming ones -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/white"
+    android:orientation="vertical">
+
+    <include layout="@layout/view_screen_header" />
+
+    <ScrollView
+        android:id="@+id/scrollContent"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/page_bg"
+        android:clipToPadding="false"
+        android:fillViewport="true"
+        android:paddingBottom="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                style="@style/SectionLabel"
+                android:layout_marginTop="8dp"
+                android:text="BILL PAY" />
+
+            <!-- "Pay a bill", or "Edit payment" while editing -->
+            <TextView
+                android:id="@+id/textFormTitle"
+                style="@style/SectionTitle"
+                android:text="Pay a bill"
+                android:textSize="24sp" />
+
+            <TextView
+                android:id="@+id/textFormSubtitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Pick a date and the money is paid from your account on that day."
+                android:textColor="@color/text_gray"
+                android:textSize="14sp" />
+
+            <!-- Form card -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="22dp">
+
+                <TextView
+                    android:id="@+id/labelPayee"
+                    style="@style/FieldLabel"
+                    android:labelFor="@id/editPayee"
+                    android:text="Pay to" />
+
+                <EditText
+                    android:id="@+id/editPayee"
+                    style="@style/FieldInput"
+                    android:hint="e.g. Internet provider"
+                    android:importantForAutofill="no"
+                    android:inputType="textCapWords"
+                    android:maxLength="40" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:labelFor="@id/editAmount"
+                    android:text="Amount" />
+
+                <EditText
+                    android:id="@+id/editAmount"
+                    style="@style/FieldInput"
+                    android:hint="$0.00"
+                    android:importantForAutofill="no"
+                    android:inputType="numberDecimal" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:text="Pay from" />
+
+                <FrameLayout
+                    style="@style/SpinnerBox"
+                    android:layout_marginBottom="16dp">
+
+                    <Spinner
+                        android:id="@+id/spinnerFrom"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:contentDescription="Account to pay from" />
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/labelDate"
+                    style="@style/FieldLabel"
+                    android:labelFor="@id/textDate"
+                    android:text="Pay on" />
+
+                <!-- Tapping this opens a date picker -->
+                <TextView
+                    android:id="@+id/textDate"
+                    style="@style/FieldInput"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:hint="Choose a date" />
+
+                <include layout="@layout/view_repeat_picker" />
+
+                <TextView
+                    android:id="@+id/textError"
+                    style="@style/ErrorText" />
+
+                <Button
+                    android:id="@+id/buttonSchedule"
+                    style="@style/PrimaryButton"
+                    android:text="Schedule payment" />
+
+                <!-- Only while editing -->
+                <Button
+                    android:id="@+id/buttonCancelEdit"
+                    style="?attr/borderlessButtonStyle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Stop editing"
+                    android:textAllCaps="false"
+                    android:textColor="@color/link_blue"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <!-- Upcoming bills and scheduled transfers -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    style="@style/SectionLabel"
+                    android:text="COMING UP" />
+
+                <TextView
+                    style="@style/SectionTitle"
+                    android:text="Upcoming payments &amp; transfers" />
+
+                <TextView
+                    style="@style/HintText"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="8dp"
+                    android:text="Tap one to edit, stop or cancel it. Failed ones can be tried again." />
+
+                <LinearLayout
+                    android:id="@+id/paymentsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <TextView
+                    android:id="@+id/textNoPayments"
+                    style="@style/EmptyStateText"
+                    android:text="Nothing scheduled."
+                    android:visibility="gone" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

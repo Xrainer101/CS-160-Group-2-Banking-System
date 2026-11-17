@@ -3,21 +3,21 @@ package database;
 import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.sql.Types;
-import java.util.ArrayList;
 import java.util.List;
 
 public class DatabaseManager {
     // This will create a file named "bank.db" in your project root directory
-    private static final String DB_URL =
-        "jdbc:sqlite:" + System.getProperty("bank.db.path", "bank.db");
+    private static final String DB_URL = "jdbc:sqlite:" + System.getProperty("bank.db.path", "bank.db");
     private static final SecureRandom RANDOM = new SecureRandom();
     // Static constant for your bank's routing number (must be 9 digits)
     public static final String BANK_ROUTING_NUMBER = "123456789";
+
+    // Connection getter method
+    public static Connection getConnection() throws SQLException {
+        return DriverManager.getConnection(DB_URL);
+    }
 
     // Initialize Database and Tables
     public static void initializeDatabase() {
@@ -32,6 +32,7 @@ public class DatabaseManager {
                 "last_name TEXT NOT NULL," +
                 "email TEXT NOT NULL UNIQUE," +
                 "phone_number TEXT NOT NULL UNIQUE," +
+                "date_of_birth TEXT DEFAULT NULL," +
                 "password_hash TEXT NOT NULL," +
                 "role TEXT NOT NULL DEFAULT 'customer' CHECK(role IN ('customer', 'admin', 'manager'))," +
                 "failed_login_attempts INTEGER NOT NULL DEFAULT 0," +
@@ -39,7 +40,28 @@ public class DatabaseManager {
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)";
             stmt.execute(createUsersTable);
 
+            // Add profile fields to databases created before Auth0 profile mapping
+            try {
+                stmt.execute("ALTER TABLE users ADD COLUMN date_of_birth TEXT DEFAULT NULL");
+            } catch (SQLException ignored) {
+                // The column already exists
+            }
+
+            // Keep user history without deleting records, but mark them as inactive
+            try {
+                stmt.execute("ALTER TABLE users ADD COLUMN profile_status TEXT NOT NULL DEFAULT 'active' CHECK(profile_status IN ('active', 'inactive'))");
+            } catch (SQLException ignored) {
+                // The column already exists
+            }
+
             System.out.println("Users table created successfully.");
+
+            // Maps an Auth0 identity to an existing banking user
+            String createAuth0IdentitiesTable = "CREATE TABLE IF NOT EXISTS auth0_identities (" +
+                "auth0_sub TEXT PRIMARY KEY," +
+                "user_id INTEGER NOT NULL UNIQUE," +
+                "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE);";
+            stmt.execute(createAuth0IdentitiesTable);
 
             // Create Bank Accounts Table
             String createAccountsTable = "CREATE TABLE IF NOT EXISTS bank_accounts (" +
@@ -57,6 +79,22 @@ public class DatabaseManager {
 
             System.out.println("Accounts table created successfully.");
 
+            // Create External Account table
+            String createExtAccountTable = "CREATE TABLE IF NOT EXISTS external_accounts (" +
+                "external_account_id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "user_id INTEGER NOT NULL," +
+                "bank_name TEXT NOT NULL," + 
+                "account_holder_name TEXT NOT NULL," +
+                "account_number TEXT NOT NULL," +
+                "routing_number TEXT NOT NULL," + 
+                "account_type TEXT NOT NULL CHECK(account_type IN ('checking', 'savings'))," + 
+                "nickname TEXT DEFAULT NULL," +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "UNIQUE(user_id, routing_number, account_number)," +
+                "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE);";
+            stmt.execute(createExtAccountTable);
+            System.out.println("External accounts table created successfully");
+
             // Create Transactions Table
             String createTransactionsTable = "CREATE TABLE IF NOT EXISTS transactions (" +
                 "transaction_id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -64,11 +102,33 @@ public class DatabaseManager {
                 "transaction_type TEXT NOT NULL CHECK(transaction_type IN ('deposit', 'withdrawal', 'transfer_in', 'transfer_out'))," +
                 "amount REAL NOT NULL," +
                 "related_account TEXT DEFAULT NULL," +
-                "timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('pending', 'completed', 'failed', 'cancelled'))," +
+                "recurrence_interval INTEGER NOT NULL DEFAULT 0," +
+                "recurrence_unit TEXT NOT NULL DEFAULT 'none' CHECK(recurrence_unit IN ('none', 'days', 'weeks', 'months', 'years'))," +
+                "scheduled_for DATETIME DEFAULT CURRENT_TIMESTAMP," +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
                 "FOREIGN KEY (account_number) REFERENCES bank_accounts(account_number) ON DELETE CASCADE);";
             stmt.execute(createTransactionsTable);
 
             System.out.println("Transactions table created successfully.");
+
+            // Credit cards table
+            String createCardsTable = "CREATE TABLE IF NOT EXISTS credit_cards (" +
+                "card_id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "user_id INTEGER NOT NULL," +
+                "card_nickname TEXT DEFAULT NULL," +
+                "cardholder_name TEXT NOT NULL," +
+                "card_number TEXT NOT NULL UNIQUE," +
+                "expiration_date TEXT NOT NULL," +
+                "cvv TEXT NOT NULL," +
+                "credit_limit REAL NOT NULL DEFAULT 5000.00," +
+                "current_balance REAL NOT NULL DEFAULT 0.00," +
+                "status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'frozen', 'closed'))," +
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE);";
+            stmt.execute(createCardsTable);
+
+            System.out.println("Cards table created successfully.");
 
             System.out.println("Database and tables created successfully.");
 
@@ -79,122 +139,7 @@ public class DatabaseManager {
 
     // ---------------- User Accounts ------------------
 
-    // Registering a User
-    public static void registerUser(String username, String firstName, String lastName, String email, String phoneNumber, String passwordHash) {
-        String sql = "INSERT INTO users (username, first_name, last_name, email, phone_number, password_hash) VALUES (?, ?, ?, ?, ?, ?)";
-
-        // Try-with-resources ensures connection and statement close automatically
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            
-            // Bind parameters to the '?' placeholders (prevents SQL injection)
-            pstmt.setString(1, username);
-            pstmt.setString(2, firstName);
-            pstmt.setString(3, lastName);
-            pstmt.setString(4, email);
-            pstmt.setString(5, phoneNumber);
-            pstmt.setString(6, passwordHash);
-            
-            pstmt.executeUpdate();
-            System.out.println("User '" + username + "' registered successfully!");
-
-        } catch (SQLException e) {
-            System.out.println("Registration failed (Username, email, or phone number might already exist): " + e.getMessage());
-        }
-    }
-
-    // 3. Example: Running a SELECT Query (Fetching User Details)
-    public static User getUserByUsername(String targetUsername) {
-        String sql = "SELECT user_id, username, first_name, last_name, email, phone_number, role, failed_login_attempts FROM users WHERE username = ?";
-
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            
-            pstmt.setString(1, targetUsername);
-            
-            // Use executeQuery() for SELECT statements to get a ResultSet
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    int id = rs.getInt("user_id");
-                    String user = rs.getString("username");
-                    String firstName = rs.getString("first_name");
-                    String lastName = rs.getString("last_name");
-                    String email = rs.getString("email");
-                    String phone = rs.getString("phone_number");
-                    String role = rs.getString("role");
-                    int failedAttempts = rs.getInt("failed_login_attempts");
-
-                    System.out.println("Found User -> ID: " + id
-                        + ", Username: " + user
-                        + ", Name: " + firstName + " " + lastName
-                        + ", Email: " + email
-                        + ", Phone: " + phone
-                        + ", Role: " + role
-                        + ", Failed Logins: " + failedAttempts);
-
-                    return new User(id, user, firstName, lastName, email, phone, role, failedAttempts);
-                } else {
-                    System.out.println("No user found with username: " + targetUsername);
-                }
-            }
-
-        } catch (SQLException e) {
-            System.out.println("Query execution error: " + e.getMessage());
-        }
-
-        return null;
-    }
-
-    /**
-     * Fetches a user's ID by their username to avoid hardcoding foreign keys.
-     */
-    public static int getUserIdByUsername(String username) {
-        String sql = "SELECT user_id FROM users WHERE username = ?";
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, username);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getInt("user_id");
-                }
-            }
-        } catch (SQLException e) {
-            System.out.println("Error fetching user ID: " + e.getMessage());
-        }
-        return -1; // User not found
-    }
-
-    /**
-     * Deletes a user profile by username. 
-     * Re-enables foreign key constraints so ON DELETE CASCADE automatically 
-     * removes any bank accounts linked to this user.
-     */
-    public static boolean deleteUser(String username) {
-        String sql = "DELETE FROM users WHERE username = ?";
-
-        try (Connection conn = DriverManager.getConnection(DB_URL)) {
-
-            // Enable foreign keys so linked bank_accounts are automatically cleaned up
-            try (Statement stmt = conn.createStatement()) {
-                stmt.execute("PRAGMA foreign_keys = ON;");
-            }
-
-            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-                pstmt.setString(1, username);
-                int rowsDeleted = pstmt.executeUpdate();
-
-                if (rowsDeleted > 0) {
-                    System.out.println("User '" + username + "' and all linked bank accounts were deleted successfully.");
-                    return true;
-                } else {
-                    System.out.println("No user found with username: " + username);
-                }
-            }
-        } catch (SQLException e) {
-            System.out.println("Error deleting user: " + e.getMessage());
-        }
-        return false;
-    }
+    
 
     // ---------------- Bank Accounts ------------------
 
@@ -220,392 +165,12 @@ public class DatabaseManager {
         return sb.toString();
     }
 
-    /**
-     * Generates a unique 10-digit account number.
-     */
-    private static String generateUniqueAccountNumber(Connection conn) throws SQLException {
-        String accountNumber;
-        boolean isDuplicate;
-        String checkSql = "SELECT COUNT(*) FROM bank_accounts WHERE account_number = ?";
+    
 
-        do {
-            accountNumber = generateRandomDigits(10); // Generates 10 digits
-
-            try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
-                checkStmt.setString(1, accountNumber);
-                try (ResultSet rs = checkStmt.executeQuery()) {
-                    isDuplicate = rs.next() && rs.getInt(1) > 0;
-                }
-            }
-        } while (isDuplicate);
-
-        return accountNumber;
-    }
-
-    /**
-     * Creates and inserts a new bank account for an existing user.
-     * Returns account number on success
-     * Returns null on failure
-     */
-    public static String createBankAccount(int userId, String accountType, double initialDeposit) {
-        String insertSql = "INSERT INTO bank_accounts (user_id, account_number, routing_number, account_type, balance) " +
-                        "VALUES (?, ?, ?, ?, ?)";
-
-        try (Connection conn = DriverManager.getConnection(DB_URL)) {
-
-            // Unique 10-digit account number for the customer
-            String accountNumber = generateUniqueAccountNumber(conn); 
-
-            try (PreparedStatement pstmt = conn.prepareStatement(insertSql)) {
-                pstmt.setInt(1, userId);
-                pstmt.setString(2, accountNumber);
-                pstmt.setString(3, BANK_ROUTING_NUMBER); // Use the static bank routing number
-                pstmt.setString(4, accountType.toLowerCase());
-                pstmt.setDouble(5, initialDeposit);
-
-                int rowsInserted = pstmt.executeUpdate();
-                if (rowsInserted > 0) {
-                    System.out.println("Account created! User ID: " + userId + 
-                                    " | Acc #: " + accountNumber + 
-                                    " | Routing #: " + BANK_ROUTING_NUMBER + 
-                                    " | Type: " + accountType + 
-                                    " | Balance: $" + String.format("%.2f", initialDeposit));
-                    return accountNumber;
-                }
-            }
-        } catch (SQLException e) {
-            System.out.println("Failed to create bank account: " + e.getMessage());
-        }
-        return null;
-    }
-
-    // Return someting useful
-    /**
-     * Searches for and displays all bank accounts belonging to a given username.
-     */
-    public static List<BankAccount> getBankAccountsByUsername(String targetUsername) {
-        List<BankAccount> accounts = new ArrayList<>();
-        
-        // SQL JOIN ties bank_accounts to users using user_id
-        String sql = "SELECT u.username, u.first_name, u.last_name, " +
-                     "ba.account_id, ba.account_number, ba.routing_number, ba.account_type, ba.balance, ba.status " +
-                     "FROM bank_accounts ba " +
-                     "JOIN users u ON ba.user_id = u.user_id " +
-                     "WHERE u.username = ?";
-
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setString(1, targetUsername);
-
-            try (ResultSet rs = pstmt.executeQuery()) {
-                boolean foundAccount = false;
-
-                while (rs.next()) {
-                    // Print header once on the first iteration
-                    if (!foundAccount) {
-                        String fullName = rs.getString("first_name") + " " + rs.getString("last_name");
-                        System.out.println("\n=== Bank Accounts for " + targetUsername + " (" + fullName + ") ===");
-                        foundAccount = true;
-                    }
-
-                    int accountId = rs.getInt("account_id");
-                    String accountNumber = rs.getString("account_number");
-                    String routingNumber = rs.getString("routing_number");
-                    String type = rs.getString("account_type");
-                    double balance = rs.getDouble("balance");
-                    String status = rs.getString("status");
-
-                    BankAccount account = new BankAccount(accountId, accountNumber, routingNumber, type, balance, status);
-                    accounts.add(account);
-
-                    System.out.printf("Account ID: %d | Acc #: %s | Routing #: %s | Type: %-8s | Balance: $%.2f | Status: %s%n",
-                            accountId, accountNumber, routingNumber, type, balance, status);
-                }
-
-                if (!foundAccount) {
-                    System.out.println("No bank accounts found for username: " + targetUsername);
-                }
-            }
-        } catch (SQLException e) {
-            System.out.println("Error searching bank accounts: " + e.getMessage());
-        }
-
-        return accounts;
-    }
-
-    public static boolean closeBankAccount(String accountNumber) {
-        String sql = "UPDATE bank_accounts " +
-                 "SET status = 'closed', closed_at = datetime('now') " +
-                 "WHERE account_number = ? AND status != 'closed'";
-
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-            PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setString(1, accountNumber);
-            int rowsUpdated = pstmt.executeUpdate();
-
-            if (rowsUpdated > 0) {
-                System.out.println("Bank account #" + accountNumber + " has been successfully closed.");
-                return true;
-            } else {
-                System.out.println("Account closure failed: #" + accountNumber + " not found or already closed.");
-            }
-        } catch (SQLException e) {
-            System.out.println("Error closing bank account: " + e.getMessage());
-        }
-        return false;
-    }
-
-    /**
-     * Deletes a specific bank account using its account number.
-     */
-    public static boolean deleteBankAccount(String accountNumber) {
-        String sql = "DELETE FROM bank_accounts WHERE account_number = ?";
-
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setString(1, accountNumber);
-            int rowsDeleted = pstmt.executeUpdate();
-
-            if (rowsDeleted > 0) {
-                System.out.println("Bank account #" + accountNumber + " deleted successfully.");
-                return true;
-            } else {
-                System.out.println("No bank account found with account number: " + accountNumber);
-            }
-        } catch (SQLException e) {
-            System.out.println("Error deleting bank account: " + e.getMessage());
-        }
-        return false;
-    }
+    
 
     // ------------------- Transactions --------------------
 
-    /**
-     * Private helper to log a transaction record on an active connection.
-     */
-    private static void logTransaction(Connection conn, String accountNumber, String type, double amount, String relatedAccount) throws SQLException {
-        String sql = "INSERT INTO transactions (account_number, transaction_type, amount, related_account) VALUES (?, ?, ?, ?)";
-        
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, accountNumber);
-            pstmt.setString(2, type);
-            pstmt.setDouble(3, amount);
-            
-            if (relatedAccount != null) {
-                pstmt.setString(4, relatedAccount);
-            } else {
-                pstmt.setNull(4, Types.VARCHAR); // Handles standard deposits/withdrawals
-            }
-            
-            pstmt.executeUpdate();
-        }
-    }
-
-    /**
-     * Private helper to process a deposit on an active connection.
-     */
-    private static void processDeposit(Connection conn, String accountNumber, double amount) throws SQLException {
-        if (amount <= 0) {
-            throw new SQLException("Deposit amount must be greater than zero.");
-        }
-
-        // Verify account exists and is active
-        String checkSql = "SELECT status FROM bank_accounts WHERE account_number = ?";
-        try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
-            checkStmt.setString(1, accountNumber);
-            try (ResultSet rs = checkStmt.executeQuery()) {
-                if (!rs.next()) throw new SQLException("Account #" + accountNumber + " does not exist.");
-                if (!"active".equals(rs.getString("status"))) {
-                    throw new SQLException("Account #" + accountNumber + " is " + rs.getString("status") + ".");
-                }
-            }
-        }
-
-        // Add funds
-        String updateSql = "UPDATE bank_accounts SET balance = balance + ? WHERE account_number = ?";
-        try (PreparedStatement updateStmt = conn.prepareStatement(updateSql)) {
-            updateStmt.setDouble(1, amount);
-            updateStmt.setString(2, accountNumber);
-            updateStmt.executeUpdate();
-        }
-    }
-
-    /**
-     * Private helper to process a withdrawal on an active connection.
-     */
-    private static void processWithdrawal(Connection conn, String accountNumber, double amount) throws SQLException {
-        if (amount <= 0) {
-            throw new SQLException("Withdrawal amount must be greater than zero.");
-        }
-
-        // Verify account exists, is active, and has sufficient funds
-        String checkSql = "SELECT balance, status FROM bank_accounts WHERE account_number = ?";
-        try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
-            checkStmt.setString(1, accountNumber);
-            try (ResultSet rs = checkStmt.executeQuery()) {
-                if (!rs.next()) throw new SQLException("Account #" + accountNumber + " does not exist.");
-                if (!"active".equals(rs.getString("status"))) {
-                    throw new SQLException("Account #" + accountNumber + " is " + rs.getString("status") + ".");
-                }
-                if (rs.getDouble("balance") < amount) {
-                    throw new SQLException("Insufficient funds in account #" + accountNumber + ".");
-                }
-            }
-        }
-
-        // Deduct funds
-        String updateSql = "UPDATE bank_accounts SET balance = balance - ? WHERE account_number = ?";
-        try (PreparedStatement updateStmt = conn.prepareStatement(updateSql)) {
-            updateStmt.setDouble(1, amount);
-            updateStmt.setString(2, accountNumber);
-            updateStmt.executeUpdate();
-        }
-    }
-
-    /**
-     * Public method to deposit money into a single account.
-     */
-    public static boolean deposit(String accountNumber, double amount) {
-        try (Connection conn = DriverManager.getConnection(DB_URL)) {
-            conn.setAutoCommit(false); // START TRANSACTION
-            try {
-                processDeposit(conn, accountNumber, amount);
-                logTransaction(conn, accountNumber, "deposit", amount, null); // Log it
-
-                conn.commit(); // SAVE TRANSACTION
-                System.out.println("Successfully deposited $" + String.format("%.2f", amount) + " to #" + accountNumber);
-                return true;
-            } catch (SQLException e) {
-                conn.rollback(); // CANCEL TRANSACTION
-                System.out.println("Deposit failed: " + e.getMessage());
-            }
-        } catch (SQLException e) {
-            System.out.println("Database connection error: " + e.getMessage());
-        }
-        return false;
-    }
-
-    /**
-     * Public method to withdraw money from a single account.
-     */
-    public static boolean withdraw(String accountNumber, double amount) {
-        try (Connection conn = DriverManager.getConnection(DB_URL)) {
-            conn.setAutoCommit(false); // START TRANSACTION
-            try {
-                processWithdrawal(conn, accountNumber, amount);
-                logTransaction(conn, accountNumber, "withdrawal", amount, null); // Log it
-
-                conn.commit(); // SAVE TRANSACTION
-                System.out.println("Successfully withdrew $" + String.format("%.2f", amount) + " from #" + accountNumber);
-                return true;
-            } catch (SQLException e) {
-                conn.rollback(); // CANCEL TRANSACTION
-                System.out.println("Withdrawal failed: " + e.getMessage());
-            }
-        } catch (SQLException e) {
-            System.out.println("Database connection error: " + e.getMessage());
-        }
-        return false;
-    }
-
-    /**
-     * Public method to transfer money between two accounts atomically.
-     */
-    public static boolean transfer(String fromAccountNumber, String toAccountNumber, double amount) {
-        if (fromAccountNumber.equals(toAccountNumber)) {
-            System.out.println("Transfer failed: Cannot transfer money to the same account.");
-            return false;
-        }
-
-        try (Connection conn = DriverManager.getConnection(DB_URL)) {
-            conn.setAutoCommit(false); // START TRANSACTION
-            try {
-                // Execute both operations on the same connection.
-                processWithdrawal(conn, fromAccountNumber, amount); //  Withdrawal from source account
-                logTransaction(conn, fromAccountNumber, "transfer_out", amount, toAccountNumber);
-
-                processDeposit(conn, toAccountNumber, amount); // Deposit in target account
-                logTransaction(conn, toAccountNumber, "transfer_in", amount, fromAccountNumber);
-                
-                conn.commit(); // SAVE TRANSACTION
-                System.out.println("Successfully transferred $" + String.format("%.2f", amount) + 
-                                   " from #" + fromAccountNumber + " to #" + toAccountNumber);
-                return true;
-            } catch (SQLException e) {
-                conn.rollback(); // CANCEL TRANSACTION
-                System.out.println("Transfer failed (Transaction rolled back): " + e.getMessage());
-            }
-        } catch (SQLException e) {
-            System.out.println("Database connection error: " + e.getMessage());
-        }
-        return false;
-    }
-
-    // Timed transfers
-
-    /**
-     * Queries the ledger and prints a chronological bank statement for a specific account.
-     */
-    public static List<Transaction> getTransactionsByAccountNumber(String accountNumber) {
-        List<Transaction> transactions = new ArrayList<>();
-
-        // ORDER BY timestamp ASC ensures chronological order (oldest to newest)
-        String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, timestamp " +
-                     "FROM transactions WHERE account_number = ? ORDER BY timestamp ASC";
-
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setString(1, accountNumber);
-
-            try (ResultSet rs = pstmt.executeQuery()) {
-                System.out.println("\n=== Bank Statement for Account #" + accountNumber + " ===");
-                System.out.printf("%-20s | %-14s | %-10s | %s%n", "Date", "Type", "Amount", "Details");
-                System.out.println("----------------------------------------------------------------------");
-
-                boolean hasTransactions = false;
-
-                while (rs.next()) {
-                    hasTransactions = true;
-                    int id = rs.getInt("transaction_id");
-                    String accNum = rs.getString("account_number");
-                    String type = rs.getString("transaction_type");
-                    double amount = rs.getDouble("amount");
-                    String relatedAcc = rs.getString("related_account");
-                    String timestamp = rs.getString("timestamp");
-
-                    // Create the model and add it to the list
-                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, timestamp);
-                    transactions.add(transaction);
-
-                    // Determine if money is coming in or going out for formatting
-                    String amountDisplay;
-                    if (type.equals("DEPOSIT") || type.equals("TRANSFER_IN")) {
-                        amountDisplay = String.format("+$%.2f", amount);
-                    } else {
-                        amountDisplay = String.format("-$%.2f", amount);
-                    }
-
-                    // Show the related account only if it was a transfer
-                    String details = (relatedAcc != null) ? "Account #" + relatedAcc : "-";
-
-                    System.out.printf("%-20s | %-14s | %-10s | %s%n", timestamp, type, amountDisplay, details);
-                }
-
-                if (!hasTransactions) {
-                    System.out.println("No transactions found for this account.");
-                }
-                System.out.println("----------------------------------------------------------------------\n");
-            }
-        } catch (SQLException e) {
-            System.out.println("Error generating bank statement: " + e.getMessage());
-        }
-
-        return transactions;
-    }
 
     // External accounts
 
@@ -615,53 +180,302 @@ public class DatabaseManager {
     public static void main(String[] args) {
         initializeDatabase();
         
-        // Test inserting a user
-        registerUser("john_doe", "John", "Doe", "john@example.com", "1234567890", "fake_hashed_password_123");
+        // // Test inserting users
+        // System.out.println("=== SETUP: Creating Sender & Recipient ===");
+        // UserDAO.registerUser("john_doe", "John", "Doe", "john@example.com", "1234567890", "fake_hashed_password_123");
+        // UserDAO.registerUser("bob_recipient", "Bob", "Jones", "bob@example.com", "4445556666", "hash_bob");
         
-        // Test querying the user back
-        getUserByUsername("john_doe");
+        // System.out.println();
 
-        int userID = getUserIdByUsername("john_doe");
+        // // Test querying the user back
+        // System.out.println("=== TEST: Getting user and ids ===");
+        // UserDAO.getUserByUsername("john_doe");
 
-        System.out.println();
+        // int johnId = UserDAO.getUserIdByUsername("john_doe");
+        // int bobId = UserDAO.getUserIdByUsername("bob_recipient");
 
-        // Example: Create a Checking account with a $250.00 initial deposit for User ID 1
-        String testNum1 = createBankAccount(userID, "checking", 250.00);
+        // System.out.println();
 
-        // Example: Create a Savings account for the same user (User ID 1)
-        String testNum2 = createBankAccount(userID, "savings", 1000.00);
+        // // Example: Create a Checking account with a $250.00 initial deposit
+        // System.out.println("=== TEST: Creating and getting bank accounts ===");
+        // String johnCheckAcc = BankAccountDAO.createBankAccount(johnId, "checking", 250.00);
 
-        getBankAccountsByUsername("john_doe");
+        // // Example: Create a Savings account for the same user
+        // String johnSaveAcc = BankAccountDAO.createBankAccount(johnId, "savings", 1000.00);
+        // String bobAcc = BankAccountDAO.createBankAccount(bobId, "savings", 500.00);
 
-        System.out.println();
+        // BankAccountDAO.getBankAccountsByUsername("john_doe");
 
-        // Test deposit
-        deposit(testNum1, 50);
+        // System.out.println();
 
-        // Test withdraw
-        withdraw(testNum1, 25);
+        // System.out.println("=== TEST: Deposit and withdrawal ===");
+        // // Test deposit
+        // TransactionDAO.deposit(johnCheckAcc, 50);
 
-        // Test transfer
-        transfer(testNum1, testNum2, 100);
+        // // Test withdraw
+        // TransactionDAO.withdraw(johnCheckAcc, 25);
 
-        getBankAccountsByUsername("john_doe");
+        // // Test instant transfer
+        // System.out.println("=== TEST: Instant transfer ===");
+        // TransactionDAO.transfer(johnCheckAcc, johnSaveAcc, 100);
 
-        getTransactionsByAccountNumber(testNum1);
+        // BankAccountDAO.getBankAccountsByUsername("john_doe");
 
-        System.out.println();
+        // TransactionDAO.getTransactionsByAccountNumber(johnCheckAcc);
 
-        // Test close
-        if (testNum1 != null) {
-            closeBankAccount(testNum1);
-        }
+        // System.out.println();
 
-        // Test deleting a single bank account
-        deleteBankAccount(testNum1);
+        // System.out.println("=== TEST: Creating Two Future Transfers ===");
+        // // Schedule Transfer #1 ($250) and Transfer #2 ($75)
+        // TransactionDAO.transfer(johnCheckAcc, bobAcc, 250.00, "2026-12-15 09:00:00");
+        // TransactionDAO.transfer(johnCheckAcc, bobAcc, 75.00, "2026-12-25 10:00:00");
 
-        // Test deleting a user (and cascading to their remaining accounts)
-        deleteUser("john_doe");
+        // // Verify balances have NOT changed yet
+        // double johnBalance = BankAccountDAO.getBankAccountsByUsername("john_doe").get(0).getBalance();
+        // double bobBalance = BankAccountDAO.getBankAccountsByUsername("bob_recipient").get(0).getBalance();
+        // System.out.println("John balance (expected $1000.00): $" + String.format("%.2f", johnBalance));
+        // System.out.println("Bob balance   (expected $500.00):  $" + String.format("%.2f", bobBalance));
 
-        // Test finding again
-        getBankAccountsByUsername("john_doe");
+        // System.out.println();
+
+        // // Modify scheduled transfer
+        // System.out.println("=== TEST: Modifying Scheduled Transfer #1 ===");
+        // List<Transaction> johnPending = TransactionDAO.getPendingTransactionsByAccountNumber(johnCheckAcc);
+        // Transaction firstTx = johnPending.get(0); // The $250.00 transfer
+        // System.out.println("Before Edit -> ID: " + firstTx.getTransactionId() +
+        //                    " | Amount: $" + firstTx.getAmount() +
+        //                    " | Date: " + firstTx.getScheduledFor());
+
+        // // Update amount to $300.00 and push date to Dec 20
+        // boolean editSuccess = TransactionDAO.editScheduledTransaction(
+        //     firstTx.getTransactionId(), 300.00, "2026-12-20 14:30:00"
+        // );
+        // System.out.println("Edit returned: " + editSuccess);
+
+        // // Verify BOTH Alice's and Bob's pending records updated
+        // Transaction johnUpdated = TransactionDAO.getPendingTransactionsByAccountNumber(johnCheckAcc).get(0);
+        // Transaction bobUpdated = TransactionDAO.getPendingTransactionsByAccountNumber(bobAcc).get(0);
+        // System.out.println("John After Edit -> $" + johnUpdated.getAmount() + " on " + johnUpdated.getScheduledFor());
+        // System.out.println("Bob After Edit   -> $" + bobUpdated.getAmount() + " on " + bobUpdated.getScheduledFor());
+
+        // System.out.println("\n=== GUARDRAIL CHECK: Recipient Tries to Edit ===");
+        // boolean illegalEdit = TransactionDAO.editScheduledTransaction(bobUpdated.getTransactionId(), 9999.00, null);
+        // System.out.println("Recipient edit blocked (expected false): " + illegalEdit);
+
+        // System.out.println("\n=== TEST: Cancelling Scheduled Transfer #2 ===");
+        // Transaction secondTx = johnPending.get(1); // The $75.00 transfer
+        // boolean cancelSuccess = TransactionDAO.cancelScheduledTransaction(secondTx.getTransactionId());
+        // System.out.println("Cancel returned: " + cancelSuccess);
+        // System.out.println("John remaining pending count (expected 1): " +
+        //                    TransactionDAO.getPendingTransactionsByAccountNumber(johnCheckAcc).size());
+
+        // // Print full ledger to verify the cancelled row is still preserved with status = 'cancelled'
+        // System.out.println("\n=== FULL LEDGER AUDIT (JOHN) ===");
+        // for (Transaction tx : TransactionDAO.getTransactionsByAccountNumber(johnCheckAcc)) {
+        //     System.out.printf("ID: %d | Type: %-12s | Amount: $%-7.2f | Status: %-10s | Scheduled: %s%n",
+        //         tx.getTransactionId(), tx.getTransactionType(), tx.getAmount(), tx.getStatus(), tx.getScheduledFor());
+        // }
+        // TransactionDAO.getTransactionsByAccountNumber(johnCheckAcc);
+        // TransactionDAO.getTransactionsByAccountNumber(bobAcc);
+
+        // System.out.println("\n========== EXTERNAL ACCOUNT CHECKS ==========");
+        // System.out.println("\n=== 1. LINKING: Adding External Account & Testing Duplicate Guard ===");
+        // boolean linked = ExternalAccountDAO.addExternalAccount(
+        //     johnId, "Chase Bank", "John Doe", "987654321", "021000021", "checking", "My Chase Checking"
+        // );
+        // System.out.println("External account linked (expected true): " + linked);
+
+        // // Attempt to link the exact same routing + account number again
+        // boolean duplicateLinked = ExternalAccountDAO.addExternalAccount(
+        //     johnId, "Chase Bank", "John Doe", "987654321", "021000021", "checking", "Duplicate"
+        // );
+        // System.out.println("Duplicate link blocked (expected false): " + duplicateLinked);
+
+        // // Fetch dynamically to capture the generated external_account_id
+        // List<ExternalAccount> extAccounts = ExternalAccountDAO.getExternalAccountsByUserId(johnId);
+        // ExternalAccount chaseAcc = extAccounts.get(0);
+        // int extId = chaseAcc.getExternalAccountId();
+        // System.out.println("Fetched External Account -> ID: " + extId + " | " + chaseAcc.getBankName() +
+        //                    " (" + chaseAcc.getNickname() + ") #" + chaseAcc.getAccountNumber());
+
+        // System.out.println("\n=== 3. IMMEDIATE TRANSFERS: Outgoing & Incoming ===");
+        // // Send $200.00 to Chase ($1000.00 -> $800.00)
+        // TransactionDAO.transferToExternal(johnCheckAcc, extId, 200.00);
+        // double afterOut = BankAccountDAO.getBankAccountsByUsername("john_doe").get(0).getBalance();
+        // System.out.println("Balance after sending $200 to external: $" + String.format("%.2f", afterOut));
+
+        // // Pull $350.00 from Chase ($800.00 -> $1150.00)
+        // TransactionDAO.transferFromExternal(extId, johnCheckAcc, 350.00);
+        // double afterIn = BankAccountDAO.getBankAccountsByUsername("john_doe").get(0).getBalance();
+        // System.out.println("Balance after pulling $350 from external: $" + String.format("%.2f", afterIn));
+
+        // System.out.println("\n=== 4. SCHEDULED EXTERNAL TRANSFER & EDIT/CANCEL GUARDRAIL ===");
+        // // Schedule an incoming pull of $150.00 from Chase
+        // TransactionDAO.transferFromExternal(extId, johnCheckAcc, 150.00, "2026-12-15 09:00:00");
+
+        // double afterSchedule = BankAccountDAO.getBankAccountsByUsername("john_doe").get(0).getBalance();
+        // System.out.println("Balance after scheduling (expected unchanged): $" + String.format("%.2f", afterSchedule));
+
+        // // Edit the pending external transfer_in (tests the updated EXT- guardrail)
+        // Transaction pendingExtTx = TransactionDAO.getPendingTransactionsByAccountNumber(johnCheckAcc).get(0);
+        // boolean editWorked = TransactionDAO.editScheduledTransaction(
+        //     pendingExtTx.getTransactionId(), 225.00, "2026-12-18 10:00:00"
+        // );
+        // System.out.println("Edited scheduled external transfer_in (expected true): " + editWorked);
+
+        // // Cancel the pending external transfer_in
+        // boolean cancelWorked = TransactionDAO.cancelScheduledTransaction(pendingExtTx.getTransactionId());
+        // System.out.println("Cancelled scheduled external transfer_in (expected true): " + cancelWorked);
+
+        // System.out.println("\n=== 5. LEDGER AUDIT ===");
+        // for (Transaction tx : TransactionDAO.getTransactionsByAccountNumber(johnCheckAcc)) {
+        //     System.out.printf("ID: %d | Type: %-12s | Amount: $%-7.2f | Related: %-15s | Status: %-10s%n",
+        //         tx.getTransactionId(), tx.getTransactionType(), tx.getAmount(),
+        //         tx.getRelatedAccount(), tx.getStatus());
+        // }
+
+        // System.out.println("=== TEST: Close/deletion tests ===");
+        // // Test close        
+        // if (johnCheckAcc != null) {
+        //     BankAccountDAO.closeBankAccount(johnCheckAcc);
+        // }
+
+        // boolean unlinked = ExternalAccountDAO.deleteExternalAccount(extId);
+        // System.out.println("External account unlinked (expected true): " + unlinked);
+
+        // // Test deleting a single bank account
+        // BankAccountDAO.deleteBankAccount(johnCheckAcc);
+
+        // // Test deleting a user (and cascading to their remaining accounts)
+        // UserDAO.deleteUser("john_doe");
+        // UserDAO.deleteUser("bob_recipient");
+
+        // // Test finding again
+        // BankAccountDAO.getBankAccountsByUsername("john_doe");
+
+        // System.out.println("=== 1. SETUP: Creating User & Checking Account ===");
+        // UserDAO.registerUser("dana_bills", "Dana", "Lee", "dana@example.com", "5559876543", "hash_dana");
+        // int userId = UserDAO.getUserIdByUsername("dana_bills");
+        // String checkingAcc = BankAccountDAO.createBankAccount(userId, "checking", 2500.00);
+
+        // System.out.println("\n=== 2. SCHEDULE: Creating Two Custom Recurring Bills ===");
+        // // Bill #1: Every 10 days to PG&E ($120.50)
+        // boolean bill1Scheduled = TransactionDAO.scheduleRecurringBill(
+        //     checkingAcc, "PG&E", 120.50, "2026-12-01 08:00:00", 10, "days"
+        // );
+        // // Bill #2: Every 3 months to Gym Membership ($45.00)
+        // boolean bill2Scheduled = TransactionDAO.scheduleRecurringBill(
+        //     checkingAcc, "Gym Membership", 45.00, "2026-12-05 09:00:00", 3, "months"
+        // );
+        // System.out.println("Bills scheduled (expected true / true): " + bill1Scheduled + " / " + bill2Scheduled);
+
+        // // Verify balance is untouched while pending
+        // double balance = BankAccountDAO.getBankAccountsByUsername("dana_bills").get(0).getBalance();
+        // System.out.println("Balance while pending (expected $2500.00): $" + String.format("%.2f", balance));
+
+        // List<Transaction> pendingBills = TransactionDAO.getPendingTransactionsByAccountNumber(checkingAcc);
+        // Transaction pgeBill = pendingBills.get(0); // Dec 1
+        // Transaction gymBill = pendingBills.get(1); // Dec 5
+
+        // System.out.println("\n=== 3. EDIT INTERVAL & UNIT: Changing PG&E from 10 days to 2 weeks ===");
+        // boolean editRecurrence = TransactionDAO.editScheduledTransaction(
+        //     pgeBill.getTransactionId(), 135.00, "2026-12-03 08:00:00", 2, "weeks"
+        // );
+        // System.out.println("Updated PG&E recurrence (expected true): " + editRecurrence);
+
+        // Transaction updatedPge = TransactionDAO.getPendingTransactionsByAccountNumber(checkingAcc).get(0);
+        // System.out.println("PG&E Now -> $" + updatedPge.getAmount() +
+        //                    " | Every " + updatedPge.getRecurrenceInterval() + " " + updatedPge.getRecurrenceUnit() +
+        //                    " | Next Date: " + updatedPge.getScheduledFor());
+
+        // // Verify next-cycle date calculation on the updated recurrence
+        // String nextCycleDate = TransactionDAO.calculateNextScheduledDate(
+        //     updatedPge.getScheduledFor(), updatedPge.getRecurrenceInterval(), updatedPge.getRecurrenceUnit()
+        // );
+        // System.out.println("Calculated subsequent cycle date (expected 2026-12-17 08:00:00): " + nextCycleDate);
+
+        // System.out.println("\n=== 4. CONVERT TO ONE-TIME: Turning Gym Bill into a Single Payment ===");
+        // // Passing "none" automatically normalizes recurrence_interval to 0
+        // boolean convertOneTime = TransactionDAO.editScheduledTransaction(
+        //     gymBill.getTransactionId(), 45.00, null, 99, "none"
+        // );
+        // System.out.println("Converted Gym bill to one-time (expected true): " + convertOneTime);
+
+        // Transaction updatedGym = TransactionDAO.getPendingTransactionsByAccountNumber(checkingAcc).get(1);
+        // System.out.println("Gym Now  -> Interval: " + updatedGym.getRecurrenceInterval() +
+        //                    " (expected 0) | Unit: " + updatedGym.getRecurrenceUnit() + " (expected none)");
+
+        // System.out.println("\n=== 5. GUARDRAIL CHECK: Invalid Recurrence Edit ===");
+        // boolean invalidEdit = TransactionDAO.editScheduledTransaction(
+        //     updatedPge.getTransactionId(), 135.00, null, 0, "months"
+        // );
+        // System.out.println("Zero interval with 'months' blocked (expected false): " + invalidEdit);
+
+        // System.out.println("\n=== 6. LEDGER AUDIT ===");
+        // for (Transaction tx : TransactionDAO.getTransactionsByAccountNumber(checkingAcc)) {
+        //     System.out.printf("ID: %d | Payee: %-19s | Amount: $%-7.2f | Every: %d %-6s | Status: %-8s | Scheduled: %s%n",
+        //         tx.getTransactionId(), tx.getRelatedAccount(), tx.getAmount(),
+        //         tx.getRecurrenceInterval(), tx.getRecurrenceUnit(), tx.getStatus(), tx.getScheduledFor());
+        // }
+
+        // System.out.println("\n=== 7. TEARDOWN: Cleaning Test User ===");
+        // UserDAO.deleteUser("dana_bills");
+
+        System.out.println("=== 1. SETUP: Creating Test User ===");
+        UserDAO.registerUser("evan_cards", "Evan", "Miller", "evan@example.com", "5552229999", "hash_evan");
+        int userId = UserDAO.getUserIdByUsername("evan_cards");
+
+        System.out.println("\n=== 2. ADD CARD: Creating Credit Card & Testing Duplicate Guard ===");
+        boolean added = CreditCardDAO.addCreditCard(
+            userId, "Travel Rewards", "Evan Miller", "4532015112830366", "09/29", "842", 7500.00
+        );
+        System.out.println("Credit card added (expected true): " + added);
+
+        // Attempt to add the exact same card number again
+        boolean duplicateAdded = CreditCardDAO.addCreditCard(
+            userId, "Duplicate Card", "Evan Miller", "4532015112830366", "09/29", "842", 5000.00
+        );
+        System.out.println("Duplicate card blocked (expected false): " + duplicateAdded);
+
+        // Fetch dynamically to get the generated card_id
+        List<CreditCard> cards = CreditCardDAO.getCreditCardsByUserId(userId);
+        CreditCard card = cards.get(0);
+        int cardId = card.getCardId();
+
+        System.out.println("Fetched Card -> ID: " + cardId +
+                           " | Nickname: " + card.getCardNickname() +
+                           " | Masked: " + card.getMaskedCardNumber() +
+                           " | Limit: $" + String.format("%.2f", card.getCreditLimit()) +
+                           " | Status: " + card.getStatus());
+
+        System.out.println("\n=== 3. BALANCE UPDATE: Simulating Charges & Checking Available Credit ===");
+        boolean balanceUpdated = CreditCardDAO.updateCardBalance(cardId, 1250.50);
+        System.out.println("Balance updated (expected true): " + balanceUpdated);
+
+        CreditCard afterCharge = CreditCardDAO.getCreditCardsByUserId(userId).get(0);
+        System.out.println("Current Balance (expected $1250.50):   $" + String.format("%.2f", afterCharge.getCurrentBalance()));
+        System.out.println("Available Credit (expected $6249.50):  $" + String.format("%.2f", afterCharge.getAvailableCredit()));
+
+        // Guardrail check: negative balance should fail
+        boolean negativeBlocked = CreditCardDAO.updateCardBalance(cardId, -50.00);
+        System.out.println("Negative balance blocked (expected false): " + negativeBlocked);
+
+        System.out.println("\n=== 4. STATUS TOGGLE: Freezing & Reactivating Card ===");
+        CreditCardDAO.updateCardStatus(cardId, "frozen");
+        String frozenStatus = CreditCardDAO.getCreditCardsByUserId(userId).get(0).getStatus();
+        System.out.println("Status after freeze (expected frozen): " + frozenStatus);
+
+        CreditCardDAO.updateCardStatus(cardId, "active");
+        String activeStatus = CreditCardDAO.getCreditCardsByUserId(userId).get(0).getStatus();
+        System.out.println("Status after unfreeze (expected active): " + activeStatus);
+
+        // Guardrail check: invalid status string should fail
+        boolean invalidStatusBlocked = CreditCardDAO.updateCardStatus(cardId, "stolen");
+        System.out.println("Invalid status blocked (expected false): " + invalidStatusBlocked);
+
+        System.out.println("\n=== 5. TEARDOWN: Cleaning Test User (Cascades to Credit Cards) ===");
+        UserDAO.deleteUser("evan_cards");
+        System.out.println("Remaining cards for deleted user (expected 0): " +
+                           CreditCardDAO.getCreditCardsByUserId(userId).size());
     }
 }
