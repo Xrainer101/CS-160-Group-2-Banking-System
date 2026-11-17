@@ -36,6 +36,10 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
 
         session = new SessionManager(this);
+        if (session.isLoggedIn()) {
+            goToHome();
+            return;
+        }
 
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
@@ -75,12 +79,7 @@ public class MainActivity extends AppCompatActivity {
         executorService.execute(() -> {
             try {
                 ApiClient.LoginResult result = ApiClient.login(username, password);
-                ApiClient.UserProfile profile = ApiClient.getCurrentUser(result.accessToken);
-                runOnUiThread(() -> {
-                    binding.buttonLogin.setEnabled(true);
-                    session.login(result.accessToken, profile.userId, profile.name);
-                    goToHome();
-                });
+                finishAuthenticatedLogin(result.accessToken);
             } catch (ApiClient.MfaRequiredException e) { // Multi-factor authentication is required for this account
                 runOnUiThread(() -> handleMfaEnrollment(e.mfaToken, username));
             } catch (ApiClient.ApiException e) {
@@ -239,18 +238,38 @@ public class MainActivity extends AppCompatActivity {
         executorService.execute(() -> {
             try {
                 ApiClient.LoginResult result = ApiClient.completeMfaLogin(mfaToken, otp);
-                ApiClient.UserProfile profile = ApiClient.getCurrentUser(result.accessToken);
-                runOnUiThread(() -> {
-                    binding.buttonLogin.setEnabled(true);
-                    session.login(result.accessToken, profile.userId, profile.name);
-                    goToHome();
-                });
+                finishAuthenticatedLogin(result.accessToken);
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     binding.buttonLogin.setEnabled(true);
                     Toast.makeText(this, "The Duo code was invalid or expired.", Toast.LENGTH_LONG).show();
                 });
             }
+        });
+    }
+
+    // Runs off the main thread after either password login or MFA succeeds.
+    private void finishAuthenticatedLogin(String token) throws Exception {
+        ApiClient.UserProfile profile = ApiClient.getCurrentUser(token);
+        final database.DatabaseManager.LoginResult local;
+        try {
+            local = database.DatabaseManager.getInstance(this).loginAuth0User(
+                    profile.auth0Subject, profile.name, profile.email, profile.username);
+        } catch (android.database.sqlite.SQLiteConstraintException conflict) {
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                binding.buttonLogin.setEnabled(true);
+                Toast.makeText(this,
+                        "Auth0 sign-in succeeded, but an existing local profile uses this username or email. Contact your developer to migrate the local data.",
+                        Toast.LENGTH_LONG).show();
+            });
+            return;
+        }
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            session.login(token, local.user.getUserId(), profile.name, local.previousLogin);
+            binding.buttonLogin.setEnabled(true);
+            goToHome();
         });
     }
 

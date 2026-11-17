@@ -23,7 +23,7 @@ public class SessionManager {
 
     // checks whether a backend authentication token is saved
     public boolean isLoggedIn() {
-        return getToken() != null;
+        return getToken() != null && getUserId() > 0 && prefs.getBoolean("local_auth0_session", false);
     }
 
     // logged in user's id, or -1 if nobody is logged in
@@ -62,6 +62,16 @@ public class SessionManager {
             .putLong(KEY_USER_ID, userId)
             .putString(KEY_DISPLAY_NAME, displayName)
             .apply();
+    }
+
+    public void login(String token, long localUserId, String displayName, long previousLogin) {
+        prefs.edit().clear()
+                .putString(KEY_TOKEN, token)
+                .putLong(KEY_USER_ID, localUserId)
+                .putString(KEY_DISPLAY_NAME, displayName)
+                .putLong(KEY_PREVIOUS_LOGIN, previousLogin)
+                .putBoolean("local_auth0_session", true)
+                .apply();
     }
 
     // returns the display name of the logged in user

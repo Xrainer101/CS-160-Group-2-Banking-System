@@ -1,11 +1,10 @@
-
 import { getAccessToken } from "../auth/authService";
 
 const BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
   "http://localhost:8000";
 
-async function adminRequest(path, options = {}) {
+async function managerRequest(path, options = {}) {
   const token = getAccessToken();
 
   if (!token) {
@@ -17,12 +16,9 @@ async function adminRequest(path, options = {}) {
   const response = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
+      ...(options.headers || {}),
       Accept: "application/json",
       Authorization: `Bearer ${token}`,
-      ...(options.body
-        ? { "Content-Type": "application/json" }
-        : {}),
-      ...options.headers,
     },
   });
 
@@ -32,7 +28,7 @@ async function adminRequest(path, options = {}) {
     const error = new Error(
       typeof data.detail === "string"
         ? data.detail
-        : `Admin request failed (${response.status}).`
+        : `Manager request failed (${response.status}).`
     );
     error.status = response.status;
     throw error;
@@ -41,45 +37,53 @@ async function adminRequest(path, options = {}) {
   return data;
 }
 
-// Planned API:
-// GET /api/admin/clients?search=...
-export function searchClients(search = "") {
-  const params = new URLSearchParams();
-  if (search.trim()) {
-    params.set("search", search.trim());
+export async function getManagerPermission() {
+  try {
+    return await managerRequest(
+      "/api/manager/permission-check"
+    );
+  } catch (error) {
+    if (error.status === 403) {
+      return { authorized: false };
+    }
+    throw error;
   }
-
-  const query = params.toString();
-
-  return adminRequest(
-    `/api/admin/clients${query ? `?${query}` : ""}`
-  );
 }
 
-// Planned API:
-// GET /api/admin/clients/{id}/accounts
-export function getClientAccounts(clientId) {
-  return adminRequest(
-    `/api/admin/clients/${encodeURIComponent(
-      clientId
+export function getManagerSummary() {
+  return managerRequest("/api/manager/reports/summary");
+}
+
+export function getManagerCustomers() {
+  return managerRequest("/api/manager/reports/customers");
+}
+
+export function getManagerCustomerAccounts(userId) {
+  return managerRequest(
+    `/api/manager/reports/customers/${encodeURIComponent(
+      userId
     )}/accounts`
   );
 }
 
-// Planned API:
-// DELETE /api/admin/clients/{id}
-export function deleteClient(clientId) {
-  return adminRequest(
-    `/api/admin/clients/${encodeURIComponent(clientId)}`,
+export function getManagerCustomerTransactions(userId) {
+  return managerRequest(
+    `/api/manager/reports/customers/${encodeURIComponent(
+      userId
+    )}/transactions`
+  );
+}
+
+export function closeManagerCustomerAccount(accountId) {
+  return managerRequest(
+    `/api/manager/reports/accounts/${encodeURIComponent(accountId)}`,
     { method: "DELETE" }
   );
 }
 
-// Planned API:
-// DELETE /api/admin/accounts/{id}
-export function deleteClientAccount(accountId) {
-  return adminRequest(
-    `/api/admin/accounts/${encodeURIComponent(accountId)}`,
+export function deactivateManagerCustomer(userId) {
+  return managerRequest(
+    `/api/manager/reports/customers/${encodeURIComponent(userId)}`,
     { method: "DELETE" }
   );
 }

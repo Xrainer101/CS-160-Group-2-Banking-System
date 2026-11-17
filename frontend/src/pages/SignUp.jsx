@@ -3,6 +3,14 @@ import { Link } from 'react-router-dom';
 import { Landmark, ShieldCheck } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import {login, signup as createAuth0User,startMfaEnrollment, verifyMfaEnrollment} from '../auth/authService';
+
+function formatPhoneInput(value) {
+  const digits = value.replace(/\D/g, '').slice(0, 10);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
 export default function SignUp({ onAuthenticated }) {
   const [name, setName] = useState(''),
     [dateOfBirth, setDateOfBirth] = useState(''),
@@ -163,7 +171,7 @@ export default function SignUp({ onAuthenticated }) {
                 type="tel"
                 autoComplete="tel"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
                 placeholder="(555) 000-0000"
               />
             </label>

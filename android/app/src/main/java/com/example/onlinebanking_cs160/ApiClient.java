@@ -157,7 +157,8 @@ public final class ApiClient {
         String email = profileJson.optString("email", responseJson.optString("email", ""));
         String username = profileJson.optString("username", responseJson.optString("username", ""));
 
-        return new UserProfile(userId, fullName, email, username);
+        return new UserProfile(userId, fullName, email, username,
+                responseJson.getString("auth0_user_id"));
     }
         String message = responseJson.optString("detail","Could not get user profile");
         throw new ApiException(statusCode,message);
@@ -357,12 +358,14 @@ public final class ApiClient {
         public final String name;
         public final String email;
         public final String username;
+        public final String auth0Subject;
 
-        public UserProfile(long userId, String name, String email, String username){
+        public UserProfile(long userId, String name, String email, String username, String auth0Subject){
             this.userId=userId;
             this.name=name;
             this.email=email;
             this.username=username;
+            this.auth0Subject=auth0Subject;
         }
     }
     public static class AccountsResponse {

@@ -31,7 +31,7 @@ const links = [
 export default function Sidebar({
   open,
   close,
-  isAdmin = false,
+  canViewManagerReports = false,
 }) {
   return (
     <>
@@ -69,12 +69,14 @@ export default function Sidebar({
             </NavLink>
           ))}
 
-          <p
-            className="sidebar-label"
-            style={{ marginTop: 25 }}
-          >
-            ADMINISTRATION
-          </p>
+          {canViewManagerReports && (
+            <>
+              <p
+                className="sidebar-label"
+                style={{ marginTop: 25 }}
+              >
+                ADMINISTRATION
+              </p>
 
           <NavLink
             to={

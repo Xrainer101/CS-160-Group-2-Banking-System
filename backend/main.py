@@ -2,6 +2,8 @@
 import os
 import sqlite3
 import json
+import logging
+import time
 import re
 from decimal import Decimal
 from typing import Literal
@@ -15,6 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware  # Backend and frontend commu
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer   # Bearer Token authentication
 from pydantic import BaseModel, EmailStr, Field, field_validator # Validate request data
 import jpype
+
+logger = logging.getLogger("uvicorn.error")
 
 # Basic settings 
 DATABASE_PATH = os.getenv(
@@ -30,6 +34,11 @@ AUTH0_JWKS_URL = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json" if AUTH0_DOMAIN
 auth0_jwks_client = PyJWKClient(AUTH0_JWKS_URL) if AUTH0_JWKS_URL else None
 LOCKOUT_LIMIT = 10
 LOCKOUT_MINUTES = 15
+AUTH0_USERINFO_CACHE_TTL_SECONDS = 300
+_auth0_userinfo_cache = {}
+
+# def normalize_phone_number(value):
+#     return re.sub(r"\D", "", str(value))
 
 app = FastAPI(title="Online Banking API")   # Create FastAPI app
 
@@ -138,6 +147,10 @@ def validate_auth0_token(token: str):
 
 # Get Auth0 user profile
 def get_auth0_userinfo(token: str):
+    cached = _auth0_userinfo_cache.get(token)
+    if cached and time.monotonic() - cached["created_at"] < AUTH0_USERINFO_CACHE_TTL_SECONDS:
+        return cached["profile"]
+
     userinfo_url = f"https://{AUTH0_DOMAIN}/userinfo"
     request = Request(
         userinfo_url,
@@ -145,7 +158,12 @@ def get_auth0_userinfo(token: str):
     )
     try:
         with urlopen(request, timeout=10) as response:
-            return json.loads(response.read().decode("utf-8"))
+            profile = json.loads(response.read().decode("utf-8"))
+            _auth0_userinfo_cache[token] = {
+                "created_at": time.monotonic(),
+                "profile": profile,
+            }
+            return profile
     except Exception as e:
         raise HTTPException(
             status_code=502,
@@ -197,6 +215,12 @@ def link_auth0_user(token_data):
                 detail="Auth0 profile is missing a phone number needed to create a banking profile"
             )
         phone_number = str(phone_value).strip()  # Convert it to text and remove extra spaces.
+#         phone_number = normalize_phone_number(phone_value)
+#                 if len(phone_number) != 10:
+#                     raise HTTPException(
+#                         status_code=400,
+#                         detail="Phone number must contain 10 digits"
+#                     )
         date_of_birth = token_data.get("date_of_birth") or metadata.get("date_of_birth")
 
         # Check whether another banking profile already uses these values.
@@ -247,7 +271,11 @@ def link_auth0_user(token_data):
         "full_name": display_name,
         "email": str(banking_user.getEmail()),
         "phone_number": str(banking_user.getPhoneNumber()),
-        "date_of_birth": banking_user.getDateOfBirth(),
+        "date_of_birth": (
+            str(banking_user.getDateOfBirth())
+            if banking_user.getDateOfBirth() is not None
+            else None
+        ),
         "is_new_user": is_new_user,
     }
 
@@ -271,11 +299,15 @@ def check_auth0_token(credentials: HTTPAuthorizationCredentials = Depends(securi
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         token_data = validate_auth0_token(credentials.credentials)
-    except Exception:
+    except Exception as exc:
+        logger.exception(
+            "Auth0 token validation failed (%s)",
+            type(exc).__name__,
+        )
         raise HTTPException(
             status_code=401,
             detail="Invalid or expired Auth0 token"
-        )
+        ) from exc
 
     if not token_data.get("sub"):
         raise HTTPException(
@@ -308,6 +340,214 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         "banking_user": link_auth0_user(token_data)
     }
 
+# Permission needed to access manager reports
+# Managers can view customer's profiles, accounts, transactions, and delete customer accounts and profiles
+MANAGER_REPORTS_PERMISSION = "read:manager-reports"
+DELETE_ACCOUNTS_PERMISSION = "delete:accounts"
+DELETE_CUSTOMERS_PERMISSION = "delete:customers"
+def require_manager_reports_permission(user=Depends(get_current_user)):
+    # Check if the user has permission from auth0
+    permissions = user["auth0"].get("permissions") or []
+    if MANAGER_REPORTS_PERMISSION not in permissions:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to view manager reports",
+        )
+    return user
+
+def require_delete_accounts_permission(user=Depends(get_current_user)):
+    permissions = user["auth0"].get("permissions") or []
+    if DELETE_ACCOUNTS_PERMISSION not in permissions:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to close customer accounts",
+        )
+    return user
+
+def require_delete_customers_permission(user=Depends(get_current_user)):
+    permissions = user["auth0"].get("permissions") or []
+    if DELETE_CUSTOMERS_PERMISSION not in permissions:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to deactivate customers",
+        )
+    return user
+
+@app.get("/api/manager/permission-check")
+def check_manager_reports_permission(user=Depends(require_manager_reports_permission)):
+    # Test endpoint for checking manager permissions
+    return {
+        "authorized": True,
+        "permission": MANAGER_REPORTS_PERMISSION,
+        "user_id": user["banking_user"]["user_id"],
+    }
+
+def _format_datetime(value):
+    return str(value) if value is not None else None
+
+# Hide most of the account number for security
+def _mask_account_number(value):
+    if value is None:
+        return None
+    account_number = str(value)
+    return f"•••• {account_number[-4:]}"
+
+def _manager_user_response(user):
+    return {
+        "user_id": int(user.getUserId()),
+        "username": str(user.getUsername()),
+        "full_name": f"{user.getFirstName()} {user.getLastName()}".strip(),
+        "email": str(user.getEmail()),
+        "phone_number": str(user.getPhoneNumber()),
+        "date_of_birth": (
+            str(user.getDateOfBirth())
+            if user.getDateOfBirth() is not None
+            else None
+        ),
+        "role": str(user.getRole()),
+        "created_at": _format_datetime(user.getCreatedAt()),
+    }
+
+def _manager_account_response(account):
+    return {
+        "account_id": int(account.getAccountId()),
+        "user_id": int(account.getUserId()),
+        "account_type": str(account.getAccountType()),
+        "account_number": _mask_account_number(account.getAccountNumber()),
+        "routing_number": "•••••••••",
+        "balance": float(account.getBalance()),
+        "status": str(account.getStatus()),
+        "opened_at": _format_datetime(account.getOpenedAt()),
+        "closed_at": _format_datetime(account.getClosedAt()),
+    }
+
+def _manager_transaction_response(transaction):
+    return {
+        "transaction_id": int(transaction.getTransactionId()),
+        "account_number": _mask_account_number(transaction.getAccountNumber()),
+        "transaction_type": str(transaction.getTransactionType()),
+        "amount": float(transaction.getAmount()),
+        "related_account": _mask_account_number(transaction.getRelatedAccount()),
+        "status": str(transaction.getStatus()),
+        "scheduled_for": _format_datetime(transaction.getScheduledFor()),
+        "timestamp": _format_datetime(transaction.getTimestamp()),
+    }
+
+# Summary report for managers
+@app.get("/api/manager/reports/summary")
+def get_manager_report_summary(user=Depends(require_manager_reports_permission)):
+    user_dao = jpype.JClass("database.UserDAO")
+    account_dao = jpype.JClass("database.BankAccountDAO")
+    users = list(user_dao.getAllUsers())
+    accounts = []
+    for banking_user in users:
+        accounts.extend(
+            account_dao.getBankAccountsByUserId(
+                int(banking_user.getUserId())
+            )
+        )
+    return {
+        "customer_count": len(users),
+        "account_count": len(accounts),
+        "active_account_count": sum(1 for account in accounts if str(account.getStatus()).lower() == "active"),
+        "total_balance": sum(float(account.getBalance()) for account in accounts),
+    }
+@app.get("/api/manager/reports/customers")
+def get_manager_customers(user=Depends(require_manager_reports_permission)):
+    user_dao = jpype.JClass("database.UserDAO")
+    return {
+        "customers": [
+            _manager_user_response(banking_user)
+            for banking_user in list(user_dao.getAllUsers())
+        ]
+    }
+# Get all accounts for a customer
+@app.get("/api/manager/reports/customers/{user_id}/accounts")
+def get_manager_customer_accounts(user_id: int,user=Depends(require_manager_reports_permission)):
+    user_dao = jpype.JClass("database.UserDAO")
+    account_dao = jpype.JClass("database.BankAccountDAO")
+    if user_dao.getUserById(user_id) is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    return {
+        "accounts": [
+            _manager_account_response(account)
+            for account in account_dao.getBankAccountsByUserId(user_id)
+        ]
+    }
+
+@app.get("/api/manager/reports/customers/{user_id}/transactions")
+def get_manager_customer_transactions(user_id: int, user=Depends(require_manager_reports_permission)):
+    user_dao = jpype.JClass("database.UserDAO")
+    account_dao = jpype.JClass("database.BankAccountDAO")
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    if user_dao.getUserById(user_id) is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    transactions = []
+    for account in account_dao.getBankAccountsByUserId(user_id):
+        account_number = str(account.getAccountNumber())
+        transactions.extend(
+            _manager_transaction_response(transaction)
+            for transaction in transaction_dao.getTransactionsByAccountNumber(account_number)
+        )
+    return {"transactions": transactions}
+# Close a customer's bank account
+@app.delete("/api/manager/reports/accounts/{account_id}")
+def close_manager_customer_account(
+    account_id: int,
+    user=Depends(require_delete_accounts_permission),
+):
+    account_dao = jpype.JClass("database.BankAccountDAO")
+    status = account_dao.getAccountStatusById(account_id)
+
+    if status is None:
+        raise HTTPException(status_code=404, detail="Bank account not found")
+    if str(status).lower() == "closed":
+        raise HTTPException(status_code=409, detail="Bank account is already closed")
+    if not account_dao.closeBankAccountById(account_id):
+        raise HTTPException(status_code=500, detail="Unable to close bank account")
+
+    return {
+        "account_id": account_id,
+        "status": "closed",
+        "message": "Bank account closed successfully",
+    }
+
+@app.delete("/api/manager/reports/customers/{user_id}")
+def deactivate_manager_customer(
+    user_id: int,
+    user=Depends(require_delete_customers_permission),
+):
+    if user_id == user["banking_user"]["user_id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Managers cannot deactivate their own profile",
+        )
+
+    user_dao = jpype.JClass("database.UserDAO")
+    result = str(user_dao.deactivateCustomerById(user_id))
+
+    if result == "not_found":
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if result == "not_customer":
+        raise HTTPException(status_code=403, detail="Only customer profiles can be deactivated")
+    if result == "already_inactive":
+        raise HTTPException(status_code=409, detail="Customer profile is already inactive")
+    if result == "active_accounts":
+        raise HTTPException(
+            status_code=409,
+            detail="Close all customer accounts before deactivating the profile",
+        )
+    if result != "deactivated":
+        raise HTTPException(status_code=500, detail="Unable to deactivate customer profile")
+
+    return {
+        "user_id": user_id,
+        "status": "inactive",
+        "message": "Customer profile deactivated successfully",
+    }
+
 # Basic test endpoint
 @app.get("/api/data")
 def read_data():
@@ -320,7 +560,7 @@ def check_profile_availability(request: ProfileAvailabilityRequest):
     conflict = user_dao.findAuth0ProfileConflict(
         request.username.strip().lower(),
         str(request.email).strip().lower(),
-        request.phone_number.strip(),
+        request.phone_number.strip(), #normalize_phone_number(request.phone_number)
     )
     if conflict == "database":
         raise HTTPException(
