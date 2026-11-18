@@ -1,13 +1,21 @@
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
-import { useEffect, useRef, useState } from "react";
 import {
   MapContainer,
   TileLayer,
   Marker,
   Popup,
+  CircleMarker,
   useMap,
 } from "react-leaflet";
+
 import L from "leaflet";
+
 import {
   Search,
   MapPin,
@@ -15,9 +23,14 @@ import {
   LocateFixed,
   RefreshCw,
   ExternalLink,
+  CheckCircle2,
 } from "lucide-react";
 
 import "leaflet/dist/leaflet.css";
+
+// =============================================
+// CONFIGURATION
+// =============================================
 
 const DEFAULT_LOCATION = {
   lat: 37.3382,
@@ -25,102 +38,235 @@ const DEFAULT_LOCATION = {
   label: "San Jose, CA",
 };
 
-const SEARCH_RADIUS = 12000; // meters
+const SEARCH_RADIUS = 12000; // 12 km
+const MAX_RESULTS = 50;
+
 const NOMINATIM_URL =
   "https://nominatim.openstreetmap.org/search";
-const OVERPASS_URL =
-  "https://overpass.kumi.systems/api/interpreter";
 
-const atmIcon = L.divIcon({
-  className: "team2-atm-pin",
-  html: `
-    <div style="
-      width:34px;
-      height:34px;
-      border-radius:50%;
-      background:#2656c4;
-      border:3px solid white;
-      box-shadow:0 3px 10px rgba(0,0,0,.25);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      color:white;
-      font-size:17px;
-      font-weight:bold;
-    ">
-      $
-    </div>
-  `,
-  iconSize: [34, 34],
-  iconAnchor: [17, 17],
-});
+// Public Overpass servers.
+// If one fails, try the next.
+const OVERPASS_SERVERS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+];
 
-function MapController({ center, selected, results }) {
-  const map = useMap();
+// OpenStreetMap's Wikidata identifier for Chase.
+const CHASE_WIKIDATA = "Q524629";
 
-  useEffect(() => {
-    if (!center) return;
+// =============================================
+// DISTANCE CALCULATION
+// =============================================
 
-    map.setView(
-      [center.lat, center.lon],
-      12
-    );
-  }, [map, center]);
+function distanceKm(a, b) {
+  const toRadians = (value) =>
+    (value * Math.PI) / 180;
 
-  useEffect(() => {
-    if (!selected) return;
+  const latDifference = toRadians(
+    b.lat - a.lat
+  );
 
-    map.setView(
-      [selected.lat, selected.lon],
-      16
-    );
-  }, [map, selected]);
+  const lonDifference = toRadians(
+    b.lon - a.lon
+  );
 
-  return null;
-}
-
-function formatAddress(tags) {
-  const street = [
-    tags["addr:housenumber"],
-    tags["addr:street"],
-  ].filter(Boolean).join(" ");
-
-  const city = [
-    tags["addr:city"],
-    tags["addr:state"],
-    tags["addr:postcode"],
-  ].filter(Boolean).join(", ");
+  const value =
+    Math.sin(latDifference / 2) ** 2 +
+    Math.cos(toRadians(a.lat)) *
+      Math.cos(toRadians(b.lat)) *
+      Math.sin(lonDifference / 2) ** 2;
 
   return (
-    [street, city].filter(Boolean).join(", ") ||
-    tags["addr:full"] ||
-    "Address not listed in OpenStreetMap"
+    6371 *
+    2 *
+    Math.atan2(
+      Math.sqrt(value),
+      Math.sqrt(1 - value)
+    )
   );
 }
+
+function formatDistance(km) {
+  const miles = km * 0.621371;
+
+  return `${miles.toFixed(1)} mi`;
+}
+
+// =============================================
+// CHASE IDENTIFICATION
+// =============================================
+
+function isChase(tags = {}) {
+  const identifiableFields = [
+    tags.name,
+    tags.brand,
+    tags.operator,
+    tags.network,
+    tags["brand:en"],
+    tags["operator:en"],
+  ];
+
+  const nameMatches = identifiableFields.some(
+    (value) =>
+      typeof value === "string" &&
+      /\bchase\b/i.test(value)
+  );
+
+  const wikidataMatches = [
+    tags["brand:wikidata"],
+    tags["operator:wikidata"],
+  ].some(
+    (value) =>
+      typeof value === "string" &&
+      value.split(";").some(
+        (part) =>
+          part.trim() === CHASE_WIKIDATA
+      )
+  );
+
+  return nameMatches || wikidataMatches;
+}
+
+function isVerifiedChaseATM(tags = {}) {
+  if (!isChase(tags)) {
+    return false;
+  }
+
+  if (tags.amenity === "atm") {
+    return true;
+  }
+
+  // A Chase branch counts only when
+  // its OSM record explicitly says ATM=yes.
+  return (
+    tags.amenity === "bank" &&
+    tags.atm === "yes"
+  );
+}
+
+// =============================================
+// OVERPASS SEARCH
+// =============================================
 
 function makeOverpassQuery(lat, lon) {
   const area =
     `(around:${SEARCH_RADIUS},${lat},${lon})`;
 
   return `
-    [out:json][timeout:25];
+    [out:json][timeout:30];
+
     (
-      nwr${area}["amenity"="atm"]["brand"~"Chase",i];
-      nwr${area}["amenity"="atm"]["operator"~"Chase",i];
-      nwr${area}["amenity"="atm"]["name"~"Chase",i];
-      nwr${area}["amenity"="bank"]["brand"~"Chase",i]["atm"="yes"];
-      nwr${area}["amenity"="bank"]["name"~"Chase",i]["atm"="yes"];
+      nwr${area}
+        ["amenity"="atm"]
+        ["brand"~"Chase",i];
+
+      nwr${area}
+        ["amenity"="atm"]
+        ["operator"~"Chase",i];
+
+      nwr${area}
+        ["amenity"="atm"]
+        ["name"~"Chase",i];
+
+      nwr${area}
+        ["amenity"="atm"]
+        ["network"~"Chase",i];
+
+      nwr${area}
+        ["amenity"="atm"]
+        ["brand:wikidata"="${CHASE_WIKIDATA}"];
+
+      nwr${area}
+        ["amenity"="atm"]
+        ["operator:wikidata"="${CHASE_WIKIDATA}"];
+
+      nwr${area}
+        ["amenity"="bank"]
+        ["atm"="yes"]
+        ["brand"~"Chase",i];
+
+      nwr${area}
+        ["amenity"="bank"]
+        ["atm"="yes"]
+        ["operator"~"Chase",i];
+
+      nwr${area}
+        ["amenity"="bank"]
+        ["atm"="yes"]
+        ["name"~"Chase",i];
+
+      nwr${area}
+        ["amenity"="bank"]
+        ["atm"="yes"]
+        ["brand:wikidata"="${CHASE_WIKIDATA}"];
+
+      nwr${area}
+        ["amenity"="bank"]
+        ["atm"="yes"]
+        ["operator:wikidata"="${CHASE_WIKIDATA}"];
     );
+
     out center;
   `;
 }
 
+// =============================================
+// ADDRESS FORMATTING
+// =============================================
+
+function formatAddress(tags = {}) {
+  if (tags["addr:full"]) {
+    return tags["addr:full"];
+  }
+
+  const street = [
+    tags["addr:housenumber"],
+    tags["addr:street"],
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const city = [
+    tags["addr:city"],
+    tags["addr:state"],
+    tags["addr:postcode"],
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  const combined = [
+    street,
+    city,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return (
+    combined ||
+    "Street address unavailable"
+  );
+}
+
+// =============================================
+// CONVERT OPENSTREETMAP RESULTS
+// =============================================
+
 function toATM(element) {
+  const tags = element.tags || {};
+
+  // Reject anything not explicitly identified
+  // as a Chase ATM or Chase branch with ATM.
+  if (!isVerifiedChaseATM(tags)) {
+    return null;
+  }
+
   const lat =
-    element.lat ?? element.center?.lat;
+    element.lat ??
+    element.center?.lat;
 
   const lon =
-    element.lon ?? element.center?.lon;
+    element.lon ??
+    element.center?.lon;
 
   if (
     !Number.isFinite(lat) ||
@@ -129,48 +275,70 @@ function toATM(element) {
     return null;
   }
 
-  const tags = element.tags || {};
+  const isBranch =
+    tags.amenity === "bank";
 
   return {
     id: `${element.type}-${element.id}`,
+
     lat,
     lon,
+
     name:
       tags.name ||
-      tags.brand ||
-      tags.operator ||
-      "Chase ATM",
+      (isBranch
+        ? "Chase Bank"
+        : "Chase ATM"),
+
+    type: isBranch
+      ? "Chase branch with ATM"
+      : "Chase ATM",
+
+    isBranch,
+
     address: formatAddress(tags),
-    wheelchair: tags.wheelchair,
-    openingHours: tags.opening_hours,
-    type:
-      tags.amenity === "bank"
-        ? "Chase branch with ATM"
-        : "Chase ATM",
+
+    openingHours:
+      tags["opening_hours:atm"] ||
+      tags.opening_hours ||
+      "",
+
+    wheelchair:
+      tags.wheelchair || "",
+
+    distance: 0,
   };
 }
 
-async function fetchWithTimeout(
+// =============================================
+// API HELPER
+// =============================================
+
+async function fetchJSON(
   url,
   options = {},
-  timeout = 30000
+  timeoutMs = 30000
 ) {
-  const controller = new AbortController();
+  const controller =
+    new AbortController();
 
   const timeoutId = setTimeout(
     () => controller.abort(),
-    timeout
+    timeoutMs
   );
 
   try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
+    const response = await fetch(
+      url,
+      {
+        ...options,
+        signal: controller.signal,
+      }
+    );
 
     if (!response.ok) {
       throw new Error(
-        `Map service returned HTTP ${response.status}`
+        `HTTP ${response.status}`
       );
     }
 
@@ -180,86 +348,22 @@ async function fetchWithTimeout(
   }
 }
 
-function distanceKm(first, second) {
-  const radians = (degrees) =>
-    (degrees * Math.PI) / 180;
+// =============================================
+// OVERPASS FALLBACK
+// =============================================
 
-  const deltaLat = radians(
-    second.lat - first.lat
+async function fetchChaseATMs(lat, lon) {
+  const query = makeOverpassQuery(
+    lat,
+    lon
   );
 
-  const deltaLon = radians(
-    second.lon - first.lon
-  );
+  let lastError = null;
 
-  const a =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(radians(first.lat)) *
-      Math.cos(radians(second.lat)) *
-      Math.sin(deltaLon / 2) ** 2;
-
-  return 6371 * 2 * Math.atan2(
-    Math.sqrt(a),
-    Math.sqrt(1 - a)
-  );
-}
-
-function directionsURL(atm) {
-  // Opens directions in OpenStreetMap.
-  // No Google API key is required.
-  return (
-    "https://www.openstreetmap.org/directions" +
-    `?to=${encodeURIComponent(
-      `${atm.lat},${atm.lon}`
-    )}`
-  );
-}
-
-export default function ATMFinder() {
-  const [searchText, setSearchText] =
-    useState("San Jose, CA");
-
-  const [center, setCenter] =
-    useState(DEFAULT_LOCATION);
-
-  const [selected, setSelected] =
-    useState(null);
-
-  const [results, setResults] =
-    useState([]);
-
-  const [loading, setLoading] =
-    useState(false);
-
-  const [error, setError] =
-    useState("");
-
-  const [message, setMessage] =
-    useState("");
-
-  const requestId = useRef(0);
-  const lastGeocode = useRef({
-    query: "",
-    result: null,
-    timestamp: 0,
-  });
-
-  async function searchATMs(location) {
-    const id = ++requestId.current;
-
-    setLoading(true);
-    setError("");
-    setMessage("");
-    setSelected(null);
-
+  for (const server of OVERPASS_SERVERS) {
     try {
-      const query = makeOverpassQuery(
-        location.lat,
-        location.lon
-      );
-
-      const response = await fetchWithTimeout(
-        OVERPASS_URL,
+      const response = await fetchJSON(
+        server,
         {
           method: "POST",
           headers: {
@@ -270,90 +374,393 @@ export default function ATMFinder() {
             new URLSearchParams({
               data: query,
             }).toString(),
-        }
+        },
+        35000
       );
 
-      if (id !== requestId.current) return;
-
-      const parsed = (
-        response.elements || []
-      )
-        .map(toATM)
-        .filter(Boolean);
-
-      const unique = Array.from(
-        new Map(
-          parsed.map((atm) => [atm.id, atm])
-        ).values()
-      );
-
-      const sorted = unique.sort(
-        (a, b) =>
-          distanceKm(location, a) -
-          distanceKm(location, b)
-      );
-
-      setResults(sorted);
-      setCenter(location);
-
-      if (!sorted.length) {
-        setMessage(
-          "No Chase ATM records were found " +
-          "in OpenStreetMap for this area. " +
-          "Try another location or check " +
-          "Chase's official locator."
+      if (!Array.isArray(response.elements)) {
+        throw new Error(
+          "Invalid ATM search response."
         );
       }
-    } catch (err) {
-      if (id !== requestId.current) return;
 
-      setError(
-        err.name === "AbortError"
-          ? "The map search timed out. Please retry."
-          : "Unable to load ATM data. The public " +
-              "Overpass service may be busy. " +
-              (err.message || "")
+      return response.elements;
+    } catch (error) {
+      console.warn(
+        "Overpass server unavailable:",
+        server,
+        error
       );
-    } finally {
-      if (id === requestId.current) {
-        setLoading(false);
-      }
+
+      lastError = error;
     }
   }
 
+  throw (
+    lastError ||
+    new Error(
+      "All ATM search services failed."
+    )
+  );
+}
+
+// =============================================
+// SORT AND REMOVE NEAR-DUPLICATES
+// =============================================
+
+function processATMs(elements, location) {
+  const parsed = elements
+    .map(toATM)
+    .filter(Boolean)
+    .map((atm) => ({
+      ...atm,
+      distance: distanceKm(
+        location,
+        atm
+      ),
+    }))
+    .filter(
+      (atm) =>
+        atm.distance <=
+        SEARCH_RADIUS / 1000
+    );
+
+  // Keep dedicated ATM nodes ahead of
+  // branch-level ATM records at the same place.
+  parsed.sort((a, b) => {
+    if (a.isBranch !== b.isBranch) {
+      return a.isBranch ? 1 : -1;
+    }
+
+    return a.distance - b.distance;
+  });
+
+  const unique = [];
+
+  for (const atm of parsed) {
+    const duplicate = unique.some(
+      (existing) =>
+        existing.id === atm.id ||
+        distanceKm(existing, atm) <
+          0.03
+    );
+
+    if (!duplicate) {
+      unique.push(atm);
+    }
+  }
+
+  return unique
+    .sort(
+      (a, b) =>
+        a.distance - b.distance
+    )
+    .slice(0, MAX_RESULTS)
+    .map((atm, index) => ({
+      ...atm,
+      rank: index + 1,
+    }));
+}
+
+// =============================================
+// MARKER ICONS
+// =============================================
+
+function makeATMIcon(rank, selected) {
+  const background = selected
+    ? "#0d275c"
+    : "#2459cf";
+
+  const diameter = selected
+    ? 44
+    : 38;
+
+  return L.divIcon({
+    className: "team2-atm-marker",
+
+    html: `
+      <div style="
+        width:${diameter}px;
+        height:${diameter}px;
+        background:${background};
+        color:#ffffff;
+        border:3px solid #ffffff;
+        border-radius:50%;
+        box-shadow:0 3px 12px rgba(0,0,0,.3);
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        font-size:15px;
+        font-weight:800;
+        position:relative;
+      ">
+        ${rank}
+      </div>
+    `,
+
+    iconSize: [
+      diameter,
+      diameter,
+    ],
+
+    iconAnchor: [
+      diameter / 2,
+      diameter / 2,
+    ],
+
+    popupAnchor: [
+      0,
+      -diameter / 2,
+    ],
+  });
+}
+
+// =============================================
+// MAP CONTROLLER
+// =============================================
+
+function MapController({
+  center,
+  results,
+  selected,
+  markerRefs,
+}) {
+  const map = useMap();
+
   useEffect(() => {
-    // Load the default San Jose area once.
+    if (!center) return;
+
+    if (results.length > 0) {
+      const points = [
+        [
+          center.lat,
+          center.lon,
+        ],
+        ...results.map(
+          (atm) => [
+            atm.lat,
+            atm.lon,
+          ]
+        ),
+      ];
+
+      map.fitBounds(
+        L.latLngBounds(points),
+        {
+          padding: [35, 35],
+          maxZoom: 13,
+        }
+      );
+    } else {
+      map.setView(
+        [
+          center.lat,
+          center.lon,
+        ],
+        12
+      );
+    }
+  }, [map, center, results]);
+
+  useEffect(() => {
+    if (!selected) return;
+
+    map.flyTo(
+      [
+        selected.lat,
+        selected.lon,
+      ],
+      16,
+      {
+        duration: 0.7,
+      }
+    );
+
+    const marker =
+      markerRefs.current[
+        selected.id
+      ];
+
+    if (marker) {
+      marker.openPopup();
+    }
+  }, [map, selected, markerRefs]);
+
+  return null;
+}
+
+// =============================================
+// DIRECTIONS
+// =============================================
+
+function directionsURL(atm) {
+  return (
+    "https://www.openstreetmap.org/directions" +
+    `?to=${encodeURIComponent(
+      `${atm.lat},${atm.lon}`
+    )}`
+  );
+}
+
+// =============================================
+// MAIN COMPONENT
+// =============================================
+
+export default function ATMFinder() {
+  const [searchText, setSearchText] =
+    useState("San Jose, CA");
+
+  const [center, setCenter] =
+    useState(DEFAULT_LOCATION);
+
+  const [results, setResults] =
+    useState([]);
+
+  const [selected, setSelected] =
+    useState(null);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
+
+  const [message, setMessage] =
+    useState("");
+
+  const requestId = useRef(0);
+  const markerRefs = useRef({});
+
+  const locationCache = useRef(
+    new Map([
+      [
+        "san jose, ca",
+        DEFAULT_LOCATION,
+      ],
+    ])
+  );
+
+  // ===========================================
+  // FETCH NEARBY CHASE ATMS
+  // ===========================================
+
+  const searchATMs = useCallback(
+    async (location) => {
+      const requestNumber =
+        ++requestId.current;
+
+      setLoading(true);
+      setError("");
+      setMessage("");
+      setSelected(null);
+      setResults([]);
+      setCenter(location);
+
+      markerRefs.current = {};
+
+      try {
+        const elements =
+          await fetchChaseATMs(
+            location.lat,
+            location.lon
+          );
+
+        if (
+          requestNumber !==
+          requestId.current
+        ) {
+          return;
+        }
+
+        const nearby =
+          processATMs(
+            elements,
+            location
+          );
+
+        setResults(nearby);
+
+        if (!nearby.length) {
+          setMessage(
+            "No explicitly tagged Chase ATMs " +
+            "were found within 12 km of " +
+            "this location. OpenStreetMap " +
+            "may have incomplete ATM data."
+          );
+        } else {
+          setMessage(
+            `Found ${nearby.length} nearby ` +
+            "Chase ATM locations. " +
+            "Select a numbered marker " +
+            "or a result below."
+          );
+        }
+      } catch (failure) {
+        if (
+          requestNumber !==
+          requestId.current
+        ) {
+          return;
+        }
+
+        setError(
+          "Could not retrieve Chase ATM " +
+          "locations. The public map " +
+          "service may be unavailable. " +
+          "Please try again."
+        );
+
+        console.error(
+          "ATM search failed:",
+          failure
+        );
+      } finally {
+        if (
+          requestNumber ===
+          requestId.current
+        ) {
+          setLoading(false);
+        }
+      }
+    },
+    []
+  );
+
+  // Load San Jose when the page opens.
+  useEffect(() => {
     searchATMs(DEFAULT_LOCATION);
 
     return () => {
       requestId.current += 1;
     };
-  }, []);
+  }, [searchATMs]);
+
+  // ===========================================
+  // SEARCH CITY OR ZIP
+  // ===========================================
 
   async function handleSearch(event) {
     event.preventDefault();
 
-    const query = searchText.trim();
+    const query =
+      searchText.trim();
 
-    if (!query || loading) return;
+    if (!query || loading) {
+      return;
+    }
 
     setError("");
+    setMessage("");
     setLoading(true);
 
     try {
-      let place;
+      const key =
+        query.toLowerCase();
 
-      const cache = lastGeocode.current;
+      let location =
+        locationCache.current.get(key);
 
-      if (
-        cache.query.toLowerCase() ===
-          query.toLowerCase() &&
-        cache.result &&
-        Date.now() - cache.timestamp <
-          60 * 60 * 1000
-      ) {
-        place = cache.result;
-      } else {
+      if (!location) {
         const params =
           new URLSearchParams({
             q: query,
@@ -361,78 +768,127 @@ export default function ATMFinder() {
             limit: "1",
           });
 
-        const url =
-          `${NOMINATIM_URL}?${params.toString()}`;
+        const response = await fetchJSON(
+          `${NOMINATIM_URL}?${params}`,
+          {
+            headers: {
+              Accept: "application/json",
+            },
+          },
+          15000
+        );
 
-        const locations =
-          await fetchWithTimeout(url);
-
-        if (!locations.length) {
+        if (!response.length) {
           throw new Error(
-            "No matching city or address found."
+            "Location not found. " +
+            "Try a city and state " +
+            "or ZIP code."
           );
         }
 
-        place = {
-          lat: Number(locations[0].lat),
-          lon: Number(locations[0].lon),
-          label: locations[0].display_name,
+        location = {
+          lat: Number(response[0].lat),
+          lon: Number(response[0].lon),
+          label:
+            response[0].display_name,
         };
 
-        lastGeocode.current = {
-          query,
-          result: place,
-          timestamp: Date.now(),
-        };
+        if (
+          !Number.isFinite(location.lat) ||
+          !Number.isFinite(location.lon)
+        ) {
+          throw new Error(
+            "Invalid coordinates returned."
+          );
+        }
+
+        locationCache.current.set(
+          key,
+          location
+        );
       }
 
-      await searchATMs(place);
-    } catch (err) {
+      await searchATMs(location);
+    } catch (failure) {
       setError(
-        err.message ||
-          "Could not find this location."
+        failure.message ||
+        "Location search failed."
       );
-    } finally {
+
       setLoading(false);
     }
   }
 
-  function useMyLocation() {
+  // ===========================================
+  // NEAR ME
+  // ===========================================
+
+  function handleNearMe() {
     if (!navigator.geolocation) {
       setError(
-        "Your browser does not support location access."
+        "Your browser does not " +
+        "support location access."
       );
+
       return;
     }
 
     setLoading(true);
     setError("");
+    setMessage("");
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const location = {
-          lat: position.coords.latitude,
-          lon: position.coords.longitude,
-          label: "My current location",
+          lat:
+            position.coords.latitude,
+          lon:
+            position.coords.longitude,
+          label: "Your location",
         };
 
-        setSearchText("My current location");
+        setSearchText(
+          "My current location"
+        );
+
         searchATMs(location);
       },
-      (err) => {
+
+      (failure) => {
         setLoading(false);
+
         setError(
-          "Location unavailable: " +
-            err.message +
-            ". Enter a city or ZIP code instead."
+          "Could not access your location: " +
+          failure.message +
+          ". Try searching by ZIP code."
         );
       },
+
       {
         enableHighAccuracy: false,
-        timeout: 12000,
+        timeout: 15000,
       }
     );
   }
+
+  // ===========================================
+  // SELECT ATM
+  // ===========================================
+
+  function selectATM(atm) {
+    setSelected(atm);
+
+    document
+      .getElementById("chase-atm-map")
+      ?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+  }
+
+  // ===========================================
+  // UI
+  // ===========================================
 
   return (
     <>
@@ -440,54 +896,63 @@ export default function ATMFinder() {
         <span className="eyebrow">
           ATM LOCATOR
         </span>
-        <h1>Find Chase ATMs</h1>
+
+        <h1>
+          Find Chase ATMs Near You
+        </h1>
+
         <p>
-          Search for Chase ATMs near you using
-          OpenStreetMap.
+          Explore Chase ATM locations on
+          our interactive map and find
+          the closest ATM to your location.
         </p>
       </div>
 
+      {/* SEARCH SECTION */}
+
       <section className="panel">
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            marginBottom: 18,
-          }}
-        >
-          <MapPin color="#2855c8" />
-          <div>
-            <h2 style={{ margin: 0 }}>
-              Find a nearby ATM
-            </h2>
-            <small>
-              Search by city, ZIP code, or address.
-            </small>
-          </div>
-        </div>
+        <h2>
+          <MapPin
+            size={22}
+            style={{
+              display: "inline",
+              verticalAlign: "middle",
+              marginRight: 8,
+            }}
+          />
+          Search Chase ATMs
+        </h2>
+
+        <p className="panel-subtitle">
+          Enter a city, ZIP code, or address.
+          Only locations explicitly identified
+          as Chase ATMs are included.
+        </p>
 
         <form
           onSubmit={handleSearch}
           style={{
             display: "flex",
             gap: 12,
-            alignItems: "end",
             flexWrap: "wrap",
+            alignItems: "end",
           }}
         >
           <label
             style={{
-              flex: "1 1 250px",
+              flex: "1 1 240px",
             }}
           >
             Search location
+
             <input
               value={searchText}
               onChange={(event) =>
-                setSearchText(event.target.value)
+                setSearchText(
+                  event.target.value
+                )
               }
-              placeholder="e.g. San Jose, CA"
+              placeholder="San Jose, CA"
               style={{
                 width: "100%",
                 padding: 12,
@@ -496,8 +961,8 @@ export default function ATMFinder() {
           </label>
 
           <button
-            className="button button-primary"
             type="submit"
+            className="button button-primary"
             disabled={loading}
           >
             <Search size={17} />
@@ -505,41 +970,51 @@ export default function ATMFinder() {
           </button>
 
           <button
-            className="button button-outline"
             type="button"
+            className="button button-outline"
+            onClick={handleNearMe}
             disabled={loading}
-            onClick={useMyLocation}
           >
             <LocateFixed size={17} />
-            Near me
+            Near Me
           </button>
         </form>
+
+        {loading && (
+          <p
+            role="status"
+            style={{ marginTop: 15 }}
+          >
+            <RefreshCw
+              size={17}
+              style={{
+                display: "inline",
+                marginRight: 8,
+              }}
+            />
+            Finding nearby Chase ATMs...
+          </p>
+        )}
 
         {error && (
           <p
             className="form-error"
             role="alert"
-            style={{ marginTop: 16 }}
+            style={{ marginTop: 15 }}
           >
             {error}
           </p>
         )}
 
-        {message && (
+        {message && !loading && (
           <p
             role="status"
-            style={{ marginTop: 16 }}
+            style={{
+              marginTop: 15,
+              color: "#31588f",
+            }}
           >
-            {message}
-          </p>
-        )}
-
-        {loading && (
-          <p
-            role="status"
-            style={{ marginTop: 16 }}
-          >
-            <RefreshCw
+            <CheckCircle2
               size={17}
               style={{
                 display: "inline",
@@ -547,18 +1022,60 @@ export default function ATMFinder() {
                 marginRight: 8,
               }}
             />
-            Searching for Chase ATMs...
+            {message}
           </p>
         )}
+      </section>
+
+      {/* MAP SECTION */}
+
+      <section
+        className="panel"
+        id="chase-atm-map"
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent:
+              "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 12,
+            marginBottom: 18,
+          }}
+        >
+          <div>
+            <h2 style={{ margin: 0 }}>
+              Nearby Chase ATM Map
+            </h2>
+
+            <small>
+              Blue numbered markers
+              identify matching Chase
+              ATM locations.
+            </small>
+          </div>
+
+          <strong
+            style={{
+              padding: "9px 14px",
+              background: "#eaf0ff",
+              color: "#2459cf",
+              borderRadius: 20,
+            }}
+          >
+            {results.length} locations
+          </strong>
+        </div>
 
         <div
           style={{
             width: "100%",
-            height: 470,
-            marginTop: 20,
+            height: 490,
             borderRadius: 14,
             overflow: "hidden",
-            border: "1px solid #e0e6ef",
+            border:
+              "1px solid #dce5f1",
           }}
         >
           <MapContainer
@@ -581,10 +1098,37 @@ export default function ATMFinder() {
 
             <MapController
               center={center}
-              selected={selected}
               results={results}
+              selected={selected}
+              markerRefs={markerRefs}
             />
 
+            {/* Search center */}
+            <CircleMarker
+              center={[
+                center.lat,
+                center.lon,
+              ]}
+              radius={8}
+              pathOptions={{
+                color: "#ffffff",
+                weight: 3,
+                fillColor: "#16a085",
+                fillOpacity: 1,
+              }}
+            >
+              <Popup>
+                <strong>
+                  Search center
+                </strong>
+
+                <p>
+                  {center.label}
+                </p>
+              </Popup>
+            </CircleMarker>
+
+            {/* Chase ATM markers */}
             {results.map((atm) => (
               <Marker
                 key={atm.id}
@@ -592,121 +1136,257 @@ export default function ATMFinder() {
                   atm.lat,
                   atm.lon,
                 ]}
-                icon={atmIcon}
+                icon={makeATMIcon(
+                  atm.rank,
+                  selected?.id === atm.id
+                )}
+                ref={(marker) => {
+                  if (marker) {
+                    markerRefs.current[
+                      atm.id
+                    ] = marker;
+                  } else {
+                    delete markerRefs.current[
+                      atm.id
+                    ];
+                  }
+                }}
                 eventHandlers={{
                   click: () =>
                     setSelected(atm),
                 }}
               >
                 <Popup>
-                  <strong>{atm.name}</strong>
-
-                  <p>
-                    {atm.type}
-                  </p>
-
-                  <p>
-                    {atm.address}
-                  </p>
-
-                  <a
-                    href={directionsURL(atm)}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <div
+                    style={{
+                      minWidth: 190,
+                    }}
                   >
-                    Get directions
-                  </a>
+                    <strong>
+                      {atm.rank}. {atm.name}
+                    </strong>
+
+                    <p>
+                      {atm.type}
+                    </p>
+
+                    <p>
+                      {atm.address}
+                    </p>
+
+                    <strong>
+                      {formatDistance(
+                        atm.distance
+                      )}{" "}
+                      from search center
+                    </strong>
+
+                    <p>
+                      <a
+                        href={directionsURL(atm)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Get directions
+                      </a>
+                    </p>
+                  </div>
                 </Popup>
               </Marker>
             ))}
           </MapContainer>
         </div>
+
+        <p
+          style={{
+            marginTop: 12,
+            fontSize: 13,
+            color: "#718096",
+          }}
+        >
+          <strong>Map legend:</strong>{" "}
+          Blue numbers = Chase ATM locations.
+          Dark blue = selected ATM.
+          Green dot = search center.
+          Distances are straight-line estimates.
+        </p>
       </section>
+
+      {/* ATM RESULTS */}
 
       <section className="panel">
         <h2>
-          Chase ATM Results ({results.length})
+          Closest Chase ATMs
         </h2>
 
-        {results.length === 0 && (
-          <p className="empty">
-            No ATM locations to display.
-          </p>
-        )}
+        <p className="panel-subtitle">
+          Sorted from nearest to farthest,
+          within approximately 12 km
+          of your selected location.
+        </p>
 
-        <div className="summary-list">
-          {results.map((atm) => (
-            <div
-              className="summary-row"
-              key={atm.id}
-              style={{
-                gap: 15,
-                alignItems: "center",
-                background:
-                  selected?.id === atm.id
+        {!loading &&
+          !error &&
+          results.length === 0 && (
+            <p className="empty">
+              No confirmed Chase ATM
+              locations found in this area.
+              Try another city or ZIP code.
+            </p>
+          )}
+
+        <div
+          style={{
+            display: "grid",
+            gap: 14,
+          }}
+        >
+          {results.map((atm) => {
+            const active =
+              selected?.id === atm.id;
+
+            return (
+              <article
+                key={atm.id}
+                style={{
+                  display: "flex",
+                  alignItems:
+                    "flex-start",
+                  gap: 14,
+                  flexWrap: "wrap",
+                  padding: 17,
+                  borderRadius: 12,
+                  border: active
+                    ? "2px solid #2459cf"
+                    : "1px solid #e0e7f0",
+                  background: active
                     ? "#edf3ff"
-                    : "transparent",
-              }}
-            >
-              <span style={{ flex: 1 }}>
-                <strong>
-                  {atm.name}
-                </strong>
+                    : "#fff",
+                }}
+              >
+                {/* Numbered location indicator */}
 
-                <small
+                <div
                   style={{
-                    display: "block",
-                    marginTop: 5,
+                    width: 40,
+                    height: 40,
+                    borderRadius: "50%",
+                    background: active
+                      ? "#0d275c"
+                      : "#2459cf",
+                    display: "grid",
+                    placeItems: "center",
+                    color: "white",
+                    fontWeight: 800,
+                    flexShrink: 0,
                   }}
                 >
-                  {atm.type} ·{" "}
-                  {distanceKm(center, atm)
-                    .toFixed(1)}{" "}
-                  km away
-                </small>
+                  {atm.rank}
+                </div>
 
-                <small
+                <div
                   style={{
-                    display: "block",
-                    marginTop: 5,
+                    flex: "1 1 180px",
                   }}
                 >
-                  {atm.address}
-                </small>
-              </span>
+                  <strong
+                    style={{
+                      display: "block",
+                      fontSize: 16,
+                    }}
+                  >
+                    {atm.name}
+                  </strong>
 
-              <button
-                type="button"
-                className="button button-outline"
-                onClick={() =>
-                  setSelected(atm)
-                }
-              >
-                Show on map
-              </button>
+                  <small
+                    style={{
+                      display: "block",
+                      marginTop: 5,
+                      color: "#2459cf",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {atm.type}
+                  </small>
 
-              <a
-                href={directionsURL(atm)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="button button-primary"
-              >
-                <Navigation size={16} />
-                Directions
-              </a>
-            </div>
-          ))}
+                  <p
+                    style={{
+                      marginTop: 8,
+                      marginBottom: 5,
+                    }}
+                  >
+                    {atm.address}
+                  </p>
+
+                  <small
+                    style={{
+                      color: "#718096",
+                    }}
+                  >
+                    <MapPin
+                      size={14}
+                      style={{
+                        display: "inline",
+                        verticalAlign:
+                          "middle",
+                        marginRight: 4,
+                      }}
+                    />
+                    {formatDistance(
+                      atm.distance
+                    )}{" "}
+                    away
+                  </small>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="button button-outline"
+                    onClick={() =>
+                      selectATM(atm)
+                    }
+                  >
+                    <MapPin size={16} />
+                    Show on Map
+                  </button>
+
+                  <a
+                    href={directionsURL(atm)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="button button-primary"
+                  >
+                    <Navigation size={16} />
+                    Directions
+                  </a>
+                </div>
+              </article>
+            );
+          })}
         </div>
       </section>
 
+      {/* CHASE FALLBACK */}
+
       <section className="panel">
-        <h2>Verify ATM information</h2>
+        <h2>
+          Verify ATM Information
+        </h2>
 
         <p>
-          OpenStreetMap is community maintained.
-          Some Chase ATMs may not appear, and
-          operating hours or availability may
-          be incomplete.
+          ATM information comes from
+          OpenStreetMap community data.
+          Some locations may be missing
+          or outdated. A mapped ATM does
+          not guarantee it is currently
+          operating or accessible.
         </p>
 
         <a
@@ -716,7 +1396,7 @@ export default function ATMFinder() {
           rel="noopener noreferrer"
         >
           <ExternalLink size={17} />
-          Open official Chase locator
+          Verify with Chase's Official Locator
         </a>
       </section>
     </>
