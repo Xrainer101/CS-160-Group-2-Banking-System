@@ -321,7 +321,7 @@ function AppContent() {
 
     if (demoMode) {
       setAccountRefreshError("");
-      return;
+      return true;
     }
 
     setRefreshingAccounts(true);
@@ -337,12 +337,14 @@ function AppContent() {
       setTransactions(data.transactions || []);
 
       setAccountRefreshError("");
+      return true;
     } catch {
       if (version === sessionVersionRef.current) {
         setAccountRefreshError(
           "Account data could not refresh. Please retry."
         );
       }
+      return false;
     } finally {
       if (version === sessionVersionRef.current) {
         setRefreshingAccounts(false);
@@ -1030,7 +1032,6 @@ function AppContent() {
     setFrozen,
 
     notify,
-    transfer,
 
     schedulePayment,
     cancelPayment,
@@ -1280,7 +1281,10 @@ function AppContent() {
                         path="/transfers"
                         element={
                           <Transfers
-                            {...shared}
+                            key={demoMode ? "demo" : session?.access_token}
+                            accounts={accounts}
+                            demoTransfer={demoMode ? transfer : undefined}
+                            refreshAccounts={refreshAccounts}
                           />
                         }
                       />

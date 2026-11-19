@@ -6,9 +6,9 @@ import logging
 import time
 import re
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.request import Request, urlopen
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import bcrypt   # For securely hashing passwords
 import jwt      # For creating and verifying JSON Web Tokens (JWTs)
 from jwt import PyJWKClient  # Gets Auth0's public keys for token validation
@@ -825,6 +825,119 @@ class MovementRequest(BaseModel):
         return amount
 
 
+class OwnAccountDestination(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["own_account"]
+    account_id: int = Field(gt=0, strict=True)
+
+
+class BankCustomerDestination(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["bank_customer"]
+    account_number: str = Field(pattern=r"^[0-9]{10}$")
+
+
+class ExternalAccountDestination(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["external_account"]
+    external_account_id: int = Field(gt=0, strict=True)
+
+
+class TransferRequest(MovementRequest):
+    source_account_id: int = Field(gt=0, strict=True)
+    destination: Annotated[
+        OwnAccountDestination | BankCustomerDestination | ExternalAccountDestination,
+        Field(discriminator="kind"),
+    ]
+    scheduled_for: date | None = None
+
+    @field_validator("scheduled_for", mode="before")
+    @classmethod
+    def validate_scheduled_date(cls, value):
+        if value is None:
+            return None
+        try:
+            if isinstance(value, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+                parsed = date.fromisoformat(value)
+                if parsed > datetime.now(timezone.utc).date():
+                    return parsed
+        except ValueError:
+            pass
+        raise HTTPException(status_code=422, detail={
+            "field": "scheduled_for", "message": "Choose a future date (UTC).",
+        })
+
+
+def owned_external_accounts(user):
+    external_dao = jpype.JClass("database.ExternalAccountDAO")
+    return external_dao.getExternalAccountsByUserId(user["banking_user"]["user_id"])
+
+
+@app.get("/api/external-accounts")
+def get_external_accounts(user=Depends(get_current_user)):
+    return [
+        {
+            "id": int(account.getExternalAccountId()),
+            "name": str(account.getNickname() or account.getBankName()),
+            "number": _mask_account_number(account.getAccountNumber()),
+        }
+        for account in owned_external_accounts(user)
+    ]
+
+
+@app.post("/api/transfers")
+def create_transfer(request: TransferRequest, user=Depends(get_current_user)):
+    bank_dao = jpype.JClass("database.BankAccountDAO")
+    accounts = {
+        int(account.getAccountId()): account
+        for account in bank_dao.getBankAccountsByUsername(user["banking_user"]["username"])
+    }
+    source = accounts.get(request.source_account_id)
+    if source is None or str(source.getStatus()) == "closed":
+        raise HTTPException(status_code=404, detail="Source account not found.")
+    if str(source.getStatus()) != "active":
+        raise HTTPException(status_code=409, detail="The source account is inactive.")
+
+    source_number = str(source.getAccountNumber())
+    destination = request.destination
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    if isinstance(destination, ExternalAccountDestination):
+        external_id = destination.external_account_id
+        if not any(int(a.getExternalAccountId()) == external_id for a in owned_external_accounts(user)):
+            raise HTTPException(status_code=404, detail="Recipient is unavailable.")
+        send = transaction_dao.transferToExternal
+        target = external_id
+    else:
+        recipient = (
+            accounts.get(destination.account_id)
+            if isinstance(destination, OwnAccountDestination)
+            else bank_dao.getBankAccountByNumber(destination.account_number)
+        )
+        if recipient is None or str(recipient.getStatus()) != "active":
+            raise HTTPException(status_code=404, detail="Recipient is unavailable.")
+        target = str(recipient.getAccountNumber())
+        if target == source_number:
+            raise HTTPException(status_code=422, detail="Choose a different destination account.")
+        send = transaction_dao.transfer
+
+    amount = float(request.amount)
+    if request.scheduled_for is None:
+        balance = float(source.getBalance())
+        if request.amount > Decimal(str(balance)):
+            raise HTTPException(status_code=409, detail={
+                "field": "amount", "message": f"That's more than the ${balance:,.2f} available",
+            })
+        saved = send(source_number, target, amount)
+    else:
+        saved = send(source_number, target, amount, f"{request.scheduled_for} 00:00:00")
+
+    if not saved:
+        raise HTTPException(status_code=409, detail="Unable to submit the transfer. Refresh your accounts and try again.")
+    if request.scheduled_for is not None:
+        return {"status": "pending", "scheduled_for": request.scheduled_for.isoformat()}
+    return {"status": "completed"}
+
+
 @app.post("/api/accounts/{account_id}/deposit")
 def deposit_to_account(account_id: int, request: MovementRequest, user=Depends(get_current_user)):
     return move_account_money(account_id, request, user, "deposit")
@@ -899,6 +1012,9 @@ def serialize_accounts(java_accounts, include_details=False):
                 transaction_type,
                 (transaction_type.replace("_", " ").title(), "Other", "CircleDollarSign", 1),
             )
+            status = str(transaction.getStatus())
+            if status != "completed" and transaction_type in ("transfer_in", "transfer_out"):
+                name = "Incoming transfer" if transaction_type == "transfer_in" else "Outgoing transfer"
             timestamp = str(transaction.getTimestamp())
             transaction_date = datetime.fromisoformat(timestamp)
             transactions.append(
@@ -914,6 +1030,8 @@ def serialize_accounts(java_accounts, include_details=False):
                     "amount": direction * abs(float(transaction.getAmount())),
                     "account": account_id,
                     "transaction_type": transaction_type,
+                    "status": status,
+                    "scheduled_for": _format_datetime(transaction.getScheduledFor()),
                     "icon": icon,
                 }
             )

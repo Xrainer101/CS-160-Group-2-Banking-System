@@ -36,9 +36,12 @@ export function TransactionRows({ transactions }) {
                 <strong>{t.name}</strong>
                 <small>
                   {t.category} · {t.date}
+                  {t.status === 'pending' && ` · Pending${t.scheduled_for ? ` for ${t.scheduled_for.slice(0, 10)}` : ''}`}
+                  {t.status === 'failed' && ' · Failed'}
+                  {t.status === 'cancelled' && ' · Cancelled'}
                 </small>
               </div>
-              <strong className={t.amount > 0 ? 'positive' : 'negative'}>
+              <strong className={t.status && t.status !== 'completed' ? undefined : t.amount > 0 ? 'positive' : 'negative'}>
                 {t.amount > 0 ? '+' : ''}
                 {money(t.amount)}
               </strong>

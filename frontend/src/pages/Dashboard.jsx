@@ -9,7 +9,7 @@ import { money } from '../data/mockData';
 export default function Dashboard({ user, accounts, transactions, payments }) {
   const total = accounts.reduce((sum, a) => sum + a.balance, 0);
   const spent = transactions
-    .filter((t) => t.amount < 0 && t.category !== 'Transfer')
+    .filter((t) => (!t.status || t.status === 'completed') && t.amount < 0 && t.category !== 'Transfer')
     .reduce((sum, t) => sum - Math.abs(t.amount), 0);
   return (
     <>

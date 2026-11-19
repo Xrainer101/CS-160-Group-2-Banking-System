@@ -13,8 +13,8 @@ export default function Transactions({ transactions, accounts }) {
             .toLowerCase()
             .includes(search.toLowerCase()) &&
           (filter === 'all' ||
-            (filter === 'income' ? t.amount > 0 : t.amount < 0)) &&
-          (account === 'all' || t.account === account),
+            ((!t.status || t.status === 'completed') && (filter === 'income' ? t.amount > 0 : t.amount < 0))) &&
+          (account === 'all' || String(t.account) === account),
       ),
     [transactions, search, filter, account],
   );
@@ -23,7 +23,7 @@ export default function Transactions({ transactions, accounts }) {
       <div className="page-heading">
         <span className="eyebrow">ACTIVITY</span>
         <h1>Transactions</h1>
-        <p>Search and filter your demo transaction history.</p>
+        <p>Search and filter your transaction history.</p>
       </div>
       <section className="panel">
         <div className="filter-bar">

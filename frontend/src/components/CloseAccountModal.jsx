@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { money } from '../data/mockData';
 
-export default function CloseAccountModal({ account, onDismiss, onConfirm }) {
+export default function CloseAccountModal({ account, transferTo, onDismiss, onConfirm }) {
   const dialogRef = useRef(null);
   const pendingRef = useRef(false);
   const mountedRef = useRef(false);
@@ -63,6 +64,7 @@ export default function CloseAccountModal({ account, onDismiss, onConfirm }) {
       <div className="open-account-actions">
         <button type="button" className="button button-outline" autoFocus
           disabled={submitting} onClick={onDismiss}>{blocked ? 'Cancel' : 'Keep it'}</button>
+        {blocked && <Link className="button button-outline" to={transferTo}>Transfer</Link>}
         {!blocked && <button type="button" className="button button-danger"
           disabled={submitting} onClick={confirm}>Close account</button>}
       </div>
