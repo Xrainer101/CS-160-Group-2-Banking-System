@@ -13,6 +13,7 @@ import {
   ShieldUser,
   MapPinned,
   Camera,
+  SlidersHorizontal,
 } from "lucide-react";
 
 const links = [
@@ -26,6 +27,7 @@ const links = [
   ["/withdraw", "Withdraw", ArrowUp],
   ["/atm-finder", "Find Chase ATMs", MapPinned],
   ["/cards", "My Cards", CreditCard],
+  ["/settings", "Settings", SlidersHorizontal],
 ];
 
 export default function Sidebar({
