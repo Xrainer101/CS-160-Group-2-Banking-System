@@ -58,3 +58,14 @@ export function moveAccountMoney(accountId, kind, amount) {
 export function getAccounts() {
     return request('/api/accounts');
 }
+
+export function getExternalAccounts(signal) {
+    return request('/api/external-accounts', { signal });
+}
+
+export function createTransfer(transfer) {
+    return request('/api/transfers', {
+        method: 'POST',
+        body: JSON.stringify(transfer),
+    });
+}

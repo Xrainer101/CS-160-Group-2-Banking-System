@@ -157,6 +157,33 @@ public class BankAccountDAO {
         return accounts;
     }
 
+    public static BankAccount getBankAccountByNumber(String accountNumber) {
+        String sql = "SELECT account_id, user_id, account_number, routing_number, account_type, " +
+                    "balance, status, opened_at, closed_at FROM bank_accounts WHERE account_number = ?";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement statement = conn.prepareStatement(sql)) {
+            statement.setString(1, accountNumber);
+            try (ResultSet rs = statement.executeQuery()) {
+                if (rs.next()) {
+                    return new BankAccount(
+                        rs.getInt("account_id"),
+                        rs.getInt("user_id"),
+                        rs.getString("account_number"),
+                        rs.getString("routing_number"),
+                        rs.getString("account_type"),
+                        rs.getDouble("balance"),
+                        rs.getString("status"),
+                        rs.getObject("opened_at", LocalDateTime.class),
+                        rs.getObject("closed_at", LocalDateTime.class)
+                    );
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println("Error retrieving recipient account: " + e.getMessage());
+        }
+        return null;
+    }
+
     public static boolean closeBankAccount(String accountNumber) {
         String sql = "UPDATE bank_accounts " +
                  "SET status = 'closed', closed_at = datetime('now') " +

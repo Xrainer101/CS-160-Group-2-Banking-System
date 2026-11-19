@@ -15,6 +15,7 @@ function AccountDetailContent({ accountId, onCloseAccount }) {
   const [params] = useSearchParams();
   const fromOverview = params.get('from') === 'overview';
   const source = fromOverview ? '&from=overview' : '';
+  const transferTo = `/transfers?accountId=${encodeURIComponent(accountId)}${source}`;
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [showNumber, setShowNumber] = useState(false);
@@ -81,7 +82,7 @@ function AccountDetailContent({ accountId, onCloseAccount }) {
           <nav className="account-detail-actions" aria-label="Account actions">
             <Link className="button button-outline" to={`/deposit?accountId=${data.account.id}${source}`}>Deposit</Link>
             <Link className="button button-outline" to={`/withdraw?accountId=${data.account.id}${source}`}>Withdraw</Link>
-            <Link className="button button-outline" to={`/transfers?accountId=${data.account.id}${source}`}>Transfer</Link>
+            <Link className="button button-outline" to={transferTo}>Transfer</Link>
           </nav>
           <section className="panel">
             <h2>Latest activity</h2>
@@ -92,7 +93,7 @@ function AccountDetailContent({ accountId, onCloseAccount }) {
               onClick={() => setShowCloseModal(true)}>Close this account</button>
           </div>
           {showCloseModal && (
-            <CloseAccountModal account={data.account}
+            <CloseAccountModal account={data.account} transferTo={transferTo}
               onDismiss={() => setShowCloseModal(false)}
               onConfirm={() => onCloseAccount(accountId)} />
           )}

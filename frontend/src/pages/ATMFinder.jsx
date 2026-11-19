@@ -25,11 +25,12 @@ const DEFAULT_LOCATION = {
   label: "San Jose, CA",
 };
 
-const SEARCH_RADIUS = 12000; // meters
+const SEARCH_RADIUS = 30; // meters
 const NOMINATIM_URL =
   "https://nominatim.openstreetmap.org/search";
 const OVERPASS_URL =
-  "https://overpass.kumi.systems/api/interpreter";
+//   "https://overpass.kumi.systems/api/interpreter";
+    "https://overpass.private.coffee/api/interpreter";
 
 const atmIcon = L.divIcon({
   className: "team2-atm-pin",
@@ -270,7 +271,8 @@ export default function ATMFinder() {
             new URLSearchParams({
               data: query,
             }).toString(),
-        }
+        },
+        60000
       );
 
       if (id !== requestId.current) return;
