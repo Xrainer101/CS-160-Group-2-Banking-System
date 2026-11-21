@@ -230,6 +230,28 @@ public final class ApiClient {
         connection.disconnect();
     }
 
+    // Checks if the username has been deleted in the backend
+    public static boolean isDeletedUsername(String username) throws Exception {
+        URL url = new URL(BASE_URL + "/api/auth/check-deleted-username");
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("POST");
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setDoOutput(true);
+
+        JSONObject requestBody = new JSONObject();
+        requestBody.put("username", username);
+        try (OutputStream outputStream = connection.getOutputStream()) {
+            outputStream.write(requestBody.toString().getBytes(StandardCharsets.UTF_8));
+        }
+
+        int statusCode = connection.getResponseCode();
+        InputStream responseStream = statusCode >= 200 && statusCode < 300
+            ? connection.getInputStream() : connection.getErrorStream();
+        JSONObject responseJson = new JSONObject(readResponse(responseStream));
+        connection.disconnect();
+        return statusCode >= 200 && statusCode < 300 && responseJson.optBoolean("deleted", false);
+    }
+
     public static void register(
         String email,
         String username,

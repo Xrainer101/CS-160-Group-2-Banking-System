@@ -34,10 +34,18 @@ Run the following commands in the terminal from the project root to ensure auth0
 `$env:PYTHONPATH="$PWD\backend"`
 
 Set JAVA_HOME to the location of your Java 17 installation:
-`$env:JAVA_HOME="C:\Users\ivana\AppData\Local\Programs\Eclipse Adoptium\jdk-17-runtime"`
+`$env:JAVA_HOME="C:\Path\To\Your\Java17"`
 
 `$env:AUTH0_DOMAIN="dev-fg7mzenn1walaym8.us.auth0.com"`
 
 `$env:AUTH0_AUDIENCE="https://team2bank-api"`
+
+Include the management client id from the .env file:
+`$env:AUTH0_MANAGEMENT_CLIENT_ID="<client_id>"`
+
+Include the management client secret from the .env file:
+`$env:AUTH0_MANAGEMENT_CLIENT_SECRET="<client_secret>"`
+
+`$env:AUTH0_MANAGEMENT_AUDIENCE="https://dev-fg7mzenn1walaym8.us.auth0.com/api/v2/"`
 
 `python -m uvicorn backend.main:app`

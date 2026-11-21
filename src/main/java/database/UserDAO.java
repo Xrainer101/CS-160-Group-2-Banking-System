@@ -140,6 +140,38 @@ public class UserDAO {
         return null;
     }
 
+    // Returns whether a local username belongs to a deleted profile
+    public static boolean isInactiveUsername(String username) {
+        String sql = "SELECT profile_status FROM users WHERE lower(username) = lower(?)";
+
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement statement = conn.prepareStatement(sql)) {
+            statement.setString(1, username);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() && "inactive".equalsIgnoreCase(rs.getString("profile_status"));
+            }
+        } catch (SQLException e) {
+            System.out.println("Error checking username profile status: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // Returns the auth0 sub for a given user_id, or null if not found
+    public static String getAuth0SubByUserId(int userId) {
+        String sql = "SELECT auth0_sub FROM auth0_identities WHERE user_id = ?";
+
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement statement = conn.prepareStatement(sql)) {
+            statement.setInt(1, userId);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() ? rs.getString("auth0_sub") : null;
+            }
+        } catch (SQLException e) {
+            System.out.println("Error finding Auth0 subject: " + e.getMessage());
+            return null;
+        }
+    }
+
     // --- Finds a banking user by their Auth0 identifier ---
     public static User getUserByAuth0Sub(String auth0Sub) {
         String sql = "SELECT u.user_id, u.username, u.first_name, u.last_name, u.email, " +

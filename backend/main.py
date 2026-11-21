@@ -8,6 +8,8 @@ import re
 from decimal import Decimal
 from typing import Annotated, Literal
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+from urllib.parse import quote
 from datetime import date, datetime, timedelta, timezone
 import bcrypt   # For securely hashing passwords
 import jwt      # For creating and verifying JSON Web Tokens (JWTs)
@@ -29,6 +31,9 @@ DATABASE_PATH = os.getenv(
 JWT_SECRET = "local-development-secret-key-for-testing-only"
 AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN")
 AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE")
+AUTH0_MANAGEMENT_CLIENT_ID = os.getenv("AUTH0_MANAGEMENT_CLIENT_ID")
+AUTH0_MANAGEMENT_CLIENT_SECRET = os.getenv("AUTH0_MANAGEMENT_CLIENT_SECRET")
+AUTH0_MANAGEMENT_AUDIENCE = os.getenv("AUTH0_MANAGEMENT_AUDIENCE", f"https://{AUTH0_DOMAIN}/api/v2/" if AUTH0_DOMAIN else "")
 AUTH0_ISSUER = f"https://{AUTH0_DOMAIN}/" if AUTH0_DOMAIN else ""
 AUTH0_JWKS_URL = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json" if AUTH0_DOMAIN else ""
 auth0_jwks_client = PyJWKClient(AUTH0_JWKS_URL) if AUTH0_JWKS_URL else None
@@ -67,6 +72,9 @@ class ProfileAvailabilityRequest(BaseModel):
     email: EmailStr
     username: str = Field(min_length=3, max_length=30)
     phone_number: str = Field(min_length=1, max_length=30)
+
+class DeletedUsernameRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=30)
 
 # Database functions
 def get_database():
@@ -169,6 +177,49 @@ def get_auth0_userinfo(token: str):
             status_code=502,
             detail=f"Unable to retrieve Auth0 user profile: {e}"
         )
+
+# Delete Auth0 user account
+def delete_auth0_user(auth0_sub: str) -> None:
+    if not AUTH0_MANAGEMENT_CLIENT_ID or not AUTH0_MANAGEMENT_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=500,
+            detail="Auth0 account deletion is not configured on the backend",
+        )
+
+    token_request = Request(
+        f"https://{AUTH0_DOMAIN}/oauth/token",
+        data=json.dumps({
+            "grant_type": "client_credentials",
+            "client_id": AUTH0_MANAGEMENT_CLIENT_ID,
+            "client_secret": AUTH0_MANAGEMENT_CLIENT_SECRET,
+            "audience": AUTH0_MANAGEMENT_AUDIENCE,
+        }).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(token_request, timeout=10) as response:
+            management_token = json.loads(response.read().decode("utf-8"))["access_token"]
+    except Exception as exc:
+        logger.exception("Unable to obtain Auth0 Management API token")
+        raise HTTPException(status_code=502, detail="Unable to contact Auth0 for account deletion") from exc
+
+    delete_request = Request(
+        f"https://{AUTH0_DOMAIN}/api/v2/users/{quote(auth0_sub, safe='')}",
+        headers={"Authorization": f"Bearer {management_token}"},
+        method="DELETE",
+    )
+    try:
+        with urlopen(delete_request, timeout=10):
+            return
+    except HTTPError as exc:
+        if exc.code == 404:
+            return
+        logger.exception("Auth0 rejected deletion of user %s", auth0_sub)
+        raise HTTPException(status_code=502, detail="Auth0 could not delete the customer account") from exc
+    except Exception as exc:
+        logger.exception("Unable to delete Auth0 user %s", auth0_sub)
+        raise HTTPException(status_code=502, detail="Unable to contact Auth0 for account deletion") from exc
 
 # Link Auth0 user to banking user
 def link_auth0_user(token_data):
@@ -526,6 +577,7 @@ def deactivate_manager_customer(
         )
 
     user_dao = jpype.JClass("database.UserDAO")
+    auth0_sub = user_dao.getAuth0SubByUserId(user_id)
     result = str(user_dao.deactivateCustomerById(user_id))
 
     if result == "not_found":
@@ -533,6 +585,13 @@ def deactivate_manager_customer(
     if result == "not_customer":
         raise HTTPException(status_code=403, detail="Only customer profiles can be deactivated")
     if result == "already_inactive":
+        if auth0_sub:
+            delete_auth0_user(str(auth0_sub))
+            return {
+                "user_id": user_id,
+                "status": "deleted",
+                "message": "Customer account deleted successfully",
+            }
         raise HTTPException(status_code=409, detail="Customer profile is already inactive")
     if result == "active_accounts":
         raise HTTPException(
@@ -542,10 +601,13 @@ def deactivate_manager_customer(
     if result != "deactivated":
         raise HTTPException(status_code=500, detail="Unable to deactivate customer profile")
 
+    if auth0_sub:
+        delete_auth0_user(str(auth0_sub))
+
     return {
         "user_id": user_id,
-        "status": "inactive",
-        "message": "Customer profile deactivated successfully",
+        "status": "deleted",
+        "message": "Customer account deleted successfully",
     }
 
 # Basic test endpoint
@@ -554,6 +616,13 @@ def read_data():
     return {"message": "Hello from backend"}
 
 # Checks submitted email, username, and phone number before auth0 registration so duplicate errors appear on signup page
+@app.post("/api/auth/check-deleted-username")
+def check_deleted_username(request: DeletedUsernameRequest):
+    user_dao = jpype.JClass("database.UserDAO")
+    return {
+        "deleted": bool(user_dao.isInactiveUsername(request.username.strip()))
+    }
+
 @app.post("/api/auth/check-profile-availability")
 def check_profile_availability(request: ProfileAvailabilityRequest):
     user_dao = jpype.JClass("database.UserDAO") # Connectes to the Java UserDAO class to check for conflicts in the database
