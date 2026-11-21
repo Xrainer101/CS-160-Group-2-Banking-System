@@ -172,6 +172,24 @@ public class UserDAO {
         }
     }
 
+    // --- Returns the profile status ---
+    public static String getProfileStatusByAuth0Sub(String auth0Sub) {
+            String sql = "SELECT u.profile_status FROM users u " +
+                "JOIN auth0_identities ai ON ai.user_id = u.user_id " +
+                "WHERE ai.auth0_sub = ?";
+
+            try (Connection conn = DatabaseManager.getConnection();
+                PreparedStatement statement = conn.prepareStatement(sql)) {
+                statement.setString(1, auth0Sub);
+                try (ResultSet rs = statement.executeQuery()) {
+                    return rs.next() ? rs.getString("profile_status") : null;
+                }
+            } catch (SQLException e) {
+                System.out.println("Error finding Auth0 profile status: " + e.getMessage());
+                return null;
+            }
+    }
+
     // --- Finds a banking user by their Auth0 identifier ---
     public static User getUserByAuth0Sub(String auth0Sub) {
         String sql = "SELECT u.user_id, u.username, u.first_name, u.last_name, u.email, " +

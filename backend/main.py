@@ -228,6 +228,13 @@ def link_auth0_user(token_data):
     auth0_sub = token_data["sub"]
     is_new_user = False       # Stays true only when this login creates the user's local banking profile
     banking_user = user_dao.getUserByAuth0Sub(auth0_sub)
+    if banking_user is not None:
+        profile_status = user_dao.getProfileStatusByAuth0Sub(auth0_sub)
+        if str(profile_status or "").lower() == "inactive":
+            raise HTTPException(
+                status_code=403,
+                detail="Account has been deleted. Please contact support.",
+            )
     if banking_user is None and token_data.get("email"):
         banking_user = user_dao.linkAuth0SubByEmail(
             auth0_sub,
@@ -609,6 +616,32 @@ def deactivate_manager_customer(
         "status": "deleted",
         "message": "Customer account deleted successfully",
     }
+# Users delete own profile
+@app.delete("/api/auth/profile")
+def delete_own_profile(user=Depends(get_current_user)):
+    user_id = int(user["banking_user"]["user_id"])
+    user_dao = jpype.JClass("database.UserDAO")
+    auth0_sub = user_dao.getAuth0SubByUserId(user_id)
+
+    result = str(user_dao.deactivateCustomerById(user_id))
+    if result == "active_accounts":
+        raise HTTPException(
+            status_code=409,
+            detail="Please close all bank accounts before deleting your profile.",
+        )
+    if result == "already_inactive":
+        if auth0_sub:
+            delete_auth0_user(str(auth0_sub))
+            return {"status": "deleted", "message": "Customer account deleted successfully"}
+        raise HTTPException(status_code=409, detail="This profile has already been deleted.")
+    if result == "not_customer":
+        raise HTTPException(status_code=403, detail="Only customer profiles can be deleted this way")
+    if result != "deactivated":
+        raise HTTPException(status_code=500, detail="Unable to delete your profile")
+
+    if auth0_sub:
+        delete_auth0_user(str(auth0_sub))
+    return {"status": "deleted", "message": "Customer account deleted successfully"}
 
 # Basic test endpoint
 @app.get("/api/data")

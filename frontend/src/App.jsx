@@ -1032,6 +1032,7 @@ function AppContent() {
     setFrozen,
 
     notify,
+    signOut,
 
     schedulePayment,
     cancelPayment,

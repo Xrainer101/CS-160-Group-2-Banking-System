@@ -190,14 +190,14 @@
                     style="@style/HintText"
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="12dp"
-                    android:text="Contact your bank to request account deletion. This local client cannot delete your Auth0 account."
+                    android:text="Deleting your profile permanently removes your Team 2 Banking sign-in. This action cannot be undone."
                     android:textSize="13sp" />
 
                 <Button
                     android:id="@+id/buttonDeleteProfile"
                     style="@style/OutlineButton"
                     android:layout_width="match_parent"
-                    android:text="Account deletion information"
+                    android:text="DELETE PROFILE"
                     android:textColor="@color/error_red" />
             </LinearLayout>
         </LinearLayout>

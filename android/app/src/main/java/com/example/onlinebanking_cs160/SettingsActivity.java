@@ -56,11 +56,7 @@ public class SettingsActivity extends AppCompatActivity {
         buttonSaveProfile.setOnClickListener(v -> saveProfile());
         buttonChangePassword.setText("Send password reset email");
         buttonChangePassword.setOnClickListener(v -> sendAuth0PasswordReset());
-        findViewById(R.id.buttonDeleteProfile).setOnClickListener(v ->
-                new AlertDialog.Builder(this)
-                        .setTitle("Auth0 account")
-                        .setMessage("Account deletion is not available in this local client. Contact your bank to delete your Auth0 account.")
-                        .setPositiveButton("OK", null).show());
+        findViewById(R.id.buttonDeleteProfile).setOnClickListener(v -> confirmDeleteProfile());
 
         CompoundButton switchAlerts = findViewById(R.id.switchAlerts);
         switchAlerts.setChecked(Ui.transactionAlertsOn(this));
@@ -82,6 +78,42 @@ public class SettingsActivity extends AppCompatActivity {
                 String phone = user.getPhoneNumber();
                 editPhone.setText(phone.startsWith("auth0:") ? "" : phone);
             });
+        });
+    }
+    // Account deletion messages
+    private void confirmDeleteProfile() {
+        new AlertDialog.Builder(this)
+            .setTitle("Delete profile")
+            .setMessage("Are you sure you want to DELETE your profile? THIS ACTION CANNOT BE UNDONE.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("DELETE", (dialog, which) -> deleteProfile())
+            .show();
+    }
+    // ------------------------------------------------------------------
+    // Account Deletion
+    // ------------------------------------------------------------------
+    private void deleteProfile() {
+        View deleteButton = findViewById(R.id.buttonDeleteProfile);
+        deleteButton.setEnabled(false);
+        executorService.execute(() -> {
+            try {
+                ApiClient.deleteOwnProfile(session.getToken());
+                session.logout();
+                runOnUiThread(() -> {
+                    Ui.toast(this, "Account deleted successfully.");
+                    Ui.goToLogin(this);
+                });
+            } catch (ApiClient.ApiException e) {
+                runOnUiThread(() -> {
+                    deleteButton.setEnabled(true);
+                    Ui.toast(this, e.getMessage());
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    deleteButton.setEnabled(true);
+                    Ui.toast(this, "Unable to delete your profile. Please try again.");
+                });
+            }
         });
     }
 

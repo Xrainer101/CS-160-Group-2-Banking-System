@@ -34,6 +34,10 @@ export function getCurrentUser() {
     return request('/api/auth/me');
 }
 
+export function deleteOwnProfile() {
+    return request('/api/auth/profile', { method: 'DELETE' });
+}
+
 export function createAccount(accountType) {
     return request('/api/accounts', {
         method: 'POST',
