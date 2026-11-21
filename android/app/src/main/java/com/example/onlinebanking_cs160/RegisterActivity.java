@@ -102,7 +102,11 @@ public class RegisterActivity extends AppCompatActivity {
             editDateOfBirth.requestFocus();
             return;
         }
-
+        if (!isAtLeast18YearsOld(dateOfBirth)) {
+            editDateOfBirth.setError("Must be at least 18 years of age to register");
+            editDateOfBirth.requestFocus();
+            return;
+        }
         if (!Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
             editEmail.setError("Enter a valid email address");
             editEmail.requestFocus();
@@ -215,6 +219,22 @@ public class RegisterActivity extends AppCompatActivity {
             return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(date);
         } catch (ParseException e) {
             return null;
+        }
+    }
+    // Helper method for checking if the user is at least 18 years old based on their date of birth
+    private boolean isAtLeast18YearsOld(String dateOfBirth) {
+        try {
+            SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            format.setLenient(false);
+
+            Date birthDate = format.parse(dateOfBirth);
+
+            Calendar cutoffDate = Calendar.getInstance();
+            cutoffDate.add(Calendar.YEAR, -18);
+
+            return birthDate != null && !birthDate.after(cutoffDate.getTime());
+        } catch (ParseException e) {
+            return false;
         }
     }
 
