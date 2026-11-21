@@ -101,6 +101,135 @@ def test_auth0_token_can_access_current_user(client, monkeypatch):
     assert response.json()["user_id"] == 7
     assert response.json()["username"] == "ivanaaguilar"
 
+### Test: Manager permission check allows authorized user
+def test_manager_permission_check_allows_authorized_user(client, monkeypatch):
+    import main
+    # User has manager permission
+    monkeypatch.setattr(
+        main,
+        "validate_auth0_token",
+        lambda token: {
+            "sub": "auth0|manager-user",
+            "email": "manager@example.com",
+            "permissions": ["read:manager-reports"],
+        },
+    )
+    monkeypatch.setattr(
+        main,
+        "link_auth0_user",
+        lambda token_data: {
+            "user_id": 12,
+            "username": "manager",
+            "name": "Bank Manager",
+            "email": "manager@example.com",
+        },
+    )
+    response = client.get(
+        "/api/manager/permission-check",
+        headers={"Authorization": "Bearer manager-token"},
+    )
+    # 200 = authorized users
+    assert response.status_code == 200
+    assert response.json()["authorized"] is True
+    assert response.json()["permission"] == "read:manager-reports"
+
+### Test: Manager permission check rejects unauthorized user
+def test_manager_permission_check_rejects_customer(client, monkeypatch):
+    import main
+    # User does not have manager permission
+    monkeypatch.setattr(
+        main,
+        "validate_auth0_token",
+        lambda token: {
+            "sub": "auth0|customer-user",
+            "email": "customer@example.com",
+            "permissions": [],
+        },
+    )
+    monkeypatch.setattr(
+        main,
+        "link_auth0_user",
+        lambda token_data: {
+            "user_id": 13,
+            "username": "customer",
+            "name": "Bank Customer",
+            "email": "customer@example.com",
+        },
+    )
+    response = client.get(
+        "/api/manager/permission-check",
+        headers={"Authorization": "Bearer customer-token"},
+    )
+    # 403 error = Users without permission
+    assert response.status_code == 403
+    assert response.json()["detail"] == ("You do not have permission to view manager reports")
+
+### Test: Manager customer report formats profile without password
+def test_manager_customer_report_formats_profile_without_password(monkeypatch):
+    import main
+    class FakeUser:
+        def getUserId(self): return 7
+        def getUsername(self): return "ivanaaguilar"
+        def getFirstName(self): return "Ivana"
+        def getLastName(self): return "Aguilar"
+        def getEmail(self): return "ivana@example.com"
+        def getPhoneNumber(self): return "123-4567"
+        def getDateOfBirth(self): return "2003-07-22"
+        def getRole(self): return "customer"
+        def getCreatedAt(self): return None
+
+    class FakeUserDAO:
+        @staticmethod
+        def getAllUsers():
+            return [FakeUser()]
+
+    monkeypatch.setattr(main.jpype, "JClass", lambda name: FakeUserDAO)
+    result = main.get_manager_customers({})
+
+    assert result["customers"] == [{
+        "user_id": 7,
+        "username": "ivanaaguilar",
+        "full_name": "Ivana Aguilar",
+        "email": "ivana@example.com",
+        "phone_number": "123-4567",
+        "date_of_birth": "2003-07-22",
+        "role": "customer",
+        "created_at": None,
+    }]
+    assert "password_hash" not in result["customers"][0]
+
+def test_manager_customer_accounts_are_masked(monkeypatch):
+    import main
+    class FakeUserDAO:
+        @staticmethod
+        def getUserById(user_id):
+            return object()
+    class FakeAccount:
+        def getAccountId(self): return 21
+        def getUserId(self): return 7
+        def getAccountNumber(self): return "1234567890"
+        def getAccountType(self): return "checking"
+        def getBalance(self): return 100.50
+        def getStatus(self): return "active"
+        def getOpenedAt(self): return None
+        def getClosedAt(self): return None
+    class FakeAccountDAO:
+        @staticmethod
+        def getBankAccountsByUserId(user_id):
+            return [FakeAccount()]
+
+    def fake_jclass(name):
+        if name == "database.UserDAO": return FakeUserDAO
+        if name == "database.BankAccountDAO": return FakeAccountDAO
+        raise AssertionError(f"Unexpected Java class: {name}")
+
+    monkeypatch.setattr(main.jpype, "JClass", fake_jclass)
+    result = main.get_manager_customer_accounts(7, {})
+
+    assert result["accounts"][0]["account_number"] == "•••• 7890"
+    assert result["accounts"][0]["routing_number"] == "•••••••••"
+    assert result["accounts"][0]["balance"] == 100.50
+
 ### Test 5: Tests authentiated banking user can access accounts and transactions
 def test_accounts_use_authenticated_banking_user(client, monkeypatch):
     import main
