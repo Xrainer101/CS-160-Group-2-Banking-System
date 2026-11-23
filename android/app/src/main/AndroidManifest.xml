@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Auth0 login and the team backend (ApiClient) need the internet -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Deposit Check can use the camera, but the app still installs on devices without one -->
     <uses-feature
         android:name="android.hardware.camera"
@@ -16,6 +19,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.OnlineBankingCS160"
+        android:usesCleartextTraffic="true"
         tools:targetApi="31">
 
         <!-- Registration screen (opened from the login screen) -->

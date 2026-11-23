@@ -43,8 +43,9 @@ public class DatabaseManager extends SQLiteOpenHelper {
     // 8: cards table (real card numbers, replacement), deposited_checks table (no double deposits),
     //    scheduled_payments.kind/to_account_number/to_routing_number/memo (scheduled transfers)
     // 9: debit cards removed (cards table dropped; freezing went with them)
+    // 10: auth0_identities table (links an Auth0 login to a local user, like the team backend)
     //    (upgrades from 3 and up keep existing data, see onUpgrade)
-    private static final int DATABASE_VERSION = 9;
+    private static final int DATABASE_VERSION = 10;
 
     /** The bank's routing number, same as BANK_ROUTING_NUMBER in the team's backend. */
     public static final String BANK_ROUTING_NUMBER = "123456789";
@@ -57,6 +58,15 @@ public class DatabaseManager extends SQLiteOpenHelper {
     private static final String TABLE_TRANSACTIONS = "transactions";
     private static final String TABLE_SCHEDULED_PAYMENTS = "scheduled_payments";
     private static final String TABLE_DEPOSITED_CHECKS = "deposited_checks";
+    private static final String TABLE_AUTH0_IDENTITIES = "auth0_identities";
+    private static final String COL_AUTH0_SUB = "auth0_sub";
+
+    /**
+     * password_hash for users who log in with Auth0. Auth0 checks their password, so there's no
+     * local hash; this value never matches any password, so the local login can't be used for
+     * them. Same value as the team backend's UserDAO.registerAuth0User.
+     */
+    private static final String AUTH0_PASSWORD_HASH = "auth0-managed";
 
     // users
     private static final String COL_USER_ID = "user_id";
@@ -222,6 +232,14 @@ public class DatabaseManager extends SQLiteOpenHelper {
             + "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE"
             + ");";
 
+    // Auth0 logins. auth0_sub is Auth0's id for the person ("auth0|abc123"); each one belongs
+    // to exactly one local user. Same table as the team backend (DatabaseManager / UserDAO).
+    private static final String CREATE_AUTH0_IDENTITIES = "CREATE TABLE IF NOT EXISTS " + TABLE_AUTH0_IDENTITIES + " ("
+            + COL_AUTH0_SUB + " TEXT PRIMARY KEY, "
+            + COL_USER_ID + " INTEGER NOT NULL UNIQUE, "
+            + "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE"
+            + ");";
+
     private static DatabaseManager instance;
 
     /** One shared database connection for the whole app. Use this instead of "new DatabaseManager(...)". */
@@ -251,6 +269,7 @@ public class DatabaseManager extends SQLiteOpenHelper {
         db.execSQL(CREATE_TRANSACTIONS_INDEX);
         db.execSQL(CREATE_SCHEDULED_PAYMENTS);
         db.execSQL(CREATE_DEPOSITED_CHECKS);
+        db.execSQL(CREATE_AUTH0_IDENTITIES);
     }
 
     @Override
@@ -259,6 +278,7 @@ public class DatabaseManager extends SQLiteOpenHelper {
             // Very old development database: wipe and rebuild.
             // Drop child tables first because of the foreign keys.
             db.execSQL("DROP TABLE IF EXISTS " + TABLE_DEPOSITED_CHECKS);
+            db.execSQL("DROP TABLE IF EXISTS " + TABLE_AUTH0_IDENTITIES);
             db.execSQL("DROP TABLE IF EXISTS cards"); // from version 8
             db.execSQL("DROP TABLE IF EXISTS " + TABLE_SCHEDULED_PAYMENTS);
             db.execSQL("DROP TABLE IF EXISTS " + TABLE_TRANSACTIONS);
@@ -319,6 +339,9 @@ public class DatabaseManager extends SQLiteOpenHelper {
             // Debit cards were removed from the app. Databases from versions 5 to 8 also keep an
             // unused users.card_frozen column; SQLite can't easily drop it, and it does no harm.
             db.execSQL("DROP TABLE IF EXISTS cards");
+        }
+        if (oldVersion < 10) {
+            db.execSQL(CREATE_AUTH0_IDENTITIES);
         }
     }
 
@@ -480,6 +503,108 @@ public class DatabaseManager extends SQLiteOpenHelper {
     }
 
     // ==================================================================
+    // Auth0 login
+    // ==================================================================
+
+    /**
+     * Logs in a person Auth0 has already checked (MainActivity calls this after Auth0 accepts the
+     * password, and Duo if needed). auth0Sub is Auth0's id for them, like "auth0|abc123".
+     *
+     *  - First login: creates their local profile, links it to auth0Sub, and opens a checking
+     *    account. previousLogin is 0.
+     *  - Later logins: the same local profile, accounts and history. previousLogin is when they
+     *    last logged in (for "Last login" on Home).
+     *
+     * A different auth0Sub is always a different person, even with the same name.
+     *
+     * @throws SQLiteConstraintException if the username or email already belongs to another local
+     *         profile. That profile is never linked or changed, so nobody can take over someone
+     *         else's money by signing up to Auth0 with the same email.
+     */
+    public LoginResult loginAuth0User(String auth0Sub, @Nullable String name, @Nullable String email,
+                                      @Nullable String username) {
+        if (auth0Sub == null || auth0Sub.trim().isEmpty()) {
+            throw new IllegalArgumentException("auth0Sub is required");
+        }
+        SQLiteDatabase db = getWritableDatabase();
+        long userId = -1;
+        long previousLogin = 0;
+        db.beginTransaction();
+        try {
+            try (Cursor c = db.rawQuery("SELECT u." + COL_USER_ID + ", u." + COL_LAST_LOGIN_AT + " FROM "
+                            + TABLE_AUTH0_IDENTITIES + " a JOIN " + TABLE_USERS + " u ON u." + COL_USER_ID
+                            + " = a." + COL_USER_ID + " WHERE a." + COL_AUTH0_SUB + " = ?",
+                    new String[]{auth0Sub})) {
+                if (c.moveToFirst()) {
+                    userId = c.getLong(0);
+                    previousLogin = c.isNull(1) ? 0 : c.getLong(1);
+                }
+            }
+            if (userId == -1) {
+                // First time: new profile (throws if the username or email is already taken)
+                userId = insertAuth0User(db, auth0Sub, name, email, username);
+                ContentValues link = new ContentValues();
+                link.put(COL_AUTH0_SUB, auth0Sub);
+                link.put(COL_USER_ID, userId);
+                db.insertOrThrow(TABLE_AUTH0_IDENTITIES, null, link);
+                insertAccount(db, userId, "checking");
+            }
+            ContentValues login = new ContentValues();
+            login.put(COL_LAST_LOGIN_AT, System.currentTimeMillis());
+            login.put(COL_FAILED_LOGIN_ATTEMPTS, 0);
+            login.putNull(COL_LOCKOUT_UNTIL);
+            db.update(TABLE_USERS, login, COL_USER_ID + " = ?", new String[]{String.valueOf(userId)});
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        return new LoginResult(LoginResult.Status.SUCCESS, getUserById(userId), 0, 0, previousLogin);
+    }
+
+    /** True if this user logs in with Auth0 (their password is checked by Auth0, not here). */
+    public boolean isAuth0User(long userId) {
+        return count(getReadableDatabase(), "SELECT COUNT(*) FROM " + TABLE_AUTH0_IDENTITIES
+                + " WHERE " + COL_USER_ID + " = ?", String.valueOf(userId)) > 0;
+    }
+
+    /**
+     * Phone number saved for an Auth0 user until they add a real one in Settings. Auth0 doesn't
+     * send the phone number to the app, and the column must be filled in and unique.
+     */
+    public static boolean isPlaceholderPhone(@Nullable String phoneNumber) {
+        return phoneNumber != null && phoneNumber.startsWith("auth0:");
+    }
+
+    /** Inserts the users row for a first Auth0 login. Throws if username/email is taken. */
+    private static long insertAuth0User(SQLiteDatabase db, String auth0Sub, @Nullable String name,
+                                        @Nullable String email, @Nullable String username) {
+        String cleanEmail = email == null || email.trim().isEmpty() ? null : email.trim();
+        String cleanUsername = username == null || username.trim().isEmpty() ? null : username.trim();
+        if (cleanUsername == null && cleanEmail != null) {
+            cleanUsername = cleanEmail.substring(0, Math.max(1, cleanEmail.indexOf('@'))); // "jane" from jane@x.com
+        }
+        if (cleanUsername == null) cleanUsername = "user" + Math.abs(auth0Sub.hashCode());
+        if (cleanEmail == null) cleanEmail = cleanUsername + "@auth0.invalid"; // unique, never sent anywhere
+
+        // "Jane Q Doe" -> first "Jane Q", last "Doe". Auth0 often sets the name to the email
+        // address when there isn't one, so fall back to the username.
+        String fullName = name == null ? "" : name.trim();
+        if (fullName.isEmpty() || fullName.contains("@")) fullName = cleanUsername;
+        int lastSpace = fullName.lastIndexOf(' ');
+        String first = lastSpace > 0 ? fullName.substring(0, lastSpace).trim() : fullName;
+        String last = lastSpace > 0 ? fullName.substring(lastSpace + 1).trim() : "";
+
+        ContentValues values = new ContentValues();
+        values.put(COL_USERNAME, cleanUsername);
+        values.put(COL_FIRST_NAME, first);
+        values.put(COL_LAST_NAME, last);
+        values.put(COL_EMAIL, cleanEmail);
+        values.put(COL_PHONE_NUMBER, "auth0:" + auth0Sub);
+        values.put(COL_PASSWORD_HASH, AUTH0_PASSWORD_HASH);
+        return db.insertOrThrow(TABLE_USERS, null, values);
+    }
+
+    // ==================================================================
     // Users / profile (Settings screen)
     // ==================================================================
 
@@ -529,6 +654,10 @@ public class DatabaseManager extends SQLiteOpenHelper {
     }
 
     public OperationResult changePassword(long userId, String currentPassword, String newPassword) {
+        if (isAuth0User(userId)) {
+            return OperationResult.fail("Your password is managed by Auth0. Use \"Forgot password\" on the "
+                    + "login screen to change it.");
+        }
         if (!checkPassword(userId, currentPassword)) {
             return OperationResult.fail("Your current password is incorrect.");
         }
@@ -596,6 +725,24 @@ public class DatabaseManager extends SQLiteOpenHelper {
         if (password == null || !checkPassword(userId, password)) {
             return OperationResult.fail("Incorrect password.");
         }
+        return deleteUserNow(userId, cashOut);
+    }
+
+    /**
+     * Deletes a user who logs in with Auth0. Their password lives in Auth0, not here, so the
+     * Settings screen checks it with Auth0 first (ApiClient.login) and only then calls this.
+     * Everything else works like deleteUser. The person's Auth0 login itself isn't deleted: if
+     * they log in again, they get a new, empty profile.
+     */
+    public OperationResult deleteAuth0User(long userId, boolean cashOut) {
+        if (!isAuth0User(userId)) {
+            return OperationResult.fail("This profile doesn't use Auth0. Enter your password to delete it.");
+        }
+        return deleteUserNow(userId, cashOut);
+    }
+
+    /** The shared part of deleteUser and deleteAuth0User, once the password has been checked. */
+    private OperationResult deleteUserNow(long userId, boolean cashOut) {
         ProfileDeletionCheck check = getProfileDeletionCheck(userId);
         if (check.hasMoneyLeft() && !cashOut) {
             Account first = check.accountsWithMoney.get(0);
@@ -629,6 +776,7 @@ public class DatabaseManager extends SQLiteOpenHelper {
             db.delete(TABLE_SCHEDULED_PAYMENTS, COL_USER_ID + " = ? OR " + COL_ACCOUNT_NUMBER
                     + " IN (" + myAccounts + ")", new String[]{id, id});
             db.delete(TABLE_DEPOSITED_CHECKS, COL_USER_ID + " = ?", new String[]{id});
+            db.delete(TABLE_AUTH0_IDENTITIES, COL_USER_ID + " = ?", new String[]{id});
             db.delete(TABLE_BANK_ACCOUNTS, COL_USER_ID + " = ?", new String[]{id});
             int rows = db.delete(TABLE_USERS, COL_USER_ID + " = ?", new String[]{id});
             if (rows != 1) return OperationResult.fail("Your profile could not be found.");

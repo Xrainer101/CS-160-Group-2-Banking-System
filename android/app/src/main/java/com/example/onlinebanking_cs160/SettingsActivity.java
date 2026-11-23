@@ -33,6 +33,8 @@ public class SettingsActivity extends AppCompatActivity {
     private SessionManager session;
     private long userId;
     private String username; // shown in the delete-profile summary
+    private String email;
+    private boolean auth0User; // true if this person logs in with Auth0 (password checked by Auth0)
 
     private EditText editFirstName, editLastName, editEmail, editPhone;
     private EditText editCurrentPassword, editNewPassword, editConfirmPassword;
@@ -76,6 +78,7 @@ public class SettingsActivity extends AppCompatActivity {
 
         executorService.execute(() -> {
             User user = databaseManager.getUserById(userId);
+            boolean usesAuth0 = databaseManager.isAuth0User(userId);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 if (user == null) {
@@ -84,11 +87,15 @@ public class SettingsActivity extends AppCompatActivity {
                     return;
                 }
                 username = user.getUsername();
+                email = user.getEmail();
+                auth0User = usesAuth0;
                 ((TextView) findViewById(R.id.textUsername)).setText("Signed in as @" + username);
                 editFirstName.setText(user.getFirstName());
                 editLastName.setText(user.getLastName());
                 editEmail.setText(user.getEmail());
-                editPhone.setText(user.getPhoneNumber());
+                // Auth0 doesn't send the phone number, so new Auth0 users start with an empty box
+                editPhone.setText(DatabaseManager.isPlaceholderPhone(user.getPhoneNumber())
+                        ? "" : user.getPhoneNumber());
             });
         });
     }
@@ -131,6 +138,11 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void changePassword() {
         textPasswordError.setVisibility(View.GONE);
+        if (auth0User) {
+            // Auth0 keeps this password, so it's changed with Auth0's reset email
+            offerPasswordResetEmail();
+            return;
+        }
         String current = editCurrentPassword.getText().toString();
         String next = editNewPassword.getText().toString();
         String confirm = editConfirmPassword.getText().toString();
@@ -159,6 +171,27 @@ public class SettingsActivity extends AppCompatActivity {
                 }
             });
         });
+    }
+
+    /** For Auth0 users: Auth0 emails a link to set a new password. */
+    private void offerPasswordResetEmail() {
+        new AlertDialog.Builder(this)
+                .setTitle("Change your password")
+                .setMessage("Your password is managed by Auth0. We'll email a link to " + email
+                        + " so you can set a new one.")
+                .setPositiveButton("Send email", (d, w) -> executorService.execute(() -> {
+                    String message;
+                    try {
+                        ApiClient.requestPasswordReset(email);
+                        message = "Check " + email + " for a link to change your password.";
+                    } catch (Exception e) {
+                        message = "The email couldn't be sent. Check your internet connection and try again.";
+                    }
+                    String shown = message;
+                    runOnUiThread(() -> Ui.toast(this, shown));
+                }))
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     // ------------------------------------------------------------------
@@ -229,7 +262,10 @@ public class SettingsActivity extends AppCompatActivity {
         if (cashOut) {
             message.append("\n\n").append(Ui.money(check.totalBalance)).append(" will be paid out to you.");
         }
-        message.append("\n\nThis can't be undone. You'll be logged out, and your username can be used to register again.");
+        message.append(auth0User
+                ? "\n\nThis can't be undone. You'll be logged out. Your Auth0 login isn't deleted: if you log in "
+                + "again, you'll start over with a new, empty profile."
+                : "\n\nThis can't be undone. You'll be logged out, and your username can be used to register again.");
 
         new AlertDialog.Builder(this)
                 .setTitle("Delete your profile?")
@@ -262,7 +298,9 @@ public class SettingsActivity extends AppCompatActivity {
     /** Step 5: delete, log out and go back to the login screen. */
     private void deleteProfile(String password, boolean cashOut) {
         executorService.execute(() -> {
-            OperationResult result = databaseManager.deleteUser(userId, password, cashOut);
+            OperationResult result = auth0User
+                    ? deleteAuth0Profile(password, cashOut)
+                    : databaseManager.deleteUser(userId, password, cashOut);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 if (result.success) {
@@ -279,6 +317,24 @@ public class SettingsActivity extends AppCompatActivity {
                 }
             });
         });
+    }
+
+    /**
+     * Auth0 users: the password is checked by Auth0 (the same way the login screen does), then
+     * the local profile is deleted. Runs on the background thread.
+     */
+    private OperationResult deleteAuth0Profile(String password, boolean cashOut) {
+        try {
+            ApiClient.login(email, password);
+        } catch (ApiClient.MfaRequiredException passwordWasRight) {
+            // Auth0 only asks for the Duo code after the password is correct, so this counts
+        } catch (ApiClient.ApiException wrongPassword) {
+            return OperationResult.fail("Incorrect password.");
+        } catch (Exception noConnection) {
+            return OperationResult.fail("Your password couldn't be checked with Auth0. "
+                    + "Check your internet connection and try again.");
+        }
+        return databaseManager.deleteAuth0User(userId, cashOut);
     }
 
     @Override
