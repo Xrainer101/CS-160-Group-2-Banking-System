@@ -2,8 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.INTERNET" />
-
     <!-- Deposit Check can use the camera, but the app still installs on devices without one -->
     <uses-feature
         android:name="android.hardware.camera"
@@ -46,9 +44,6 @@
             android:name=".PayBillsActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
-        <activity
-            android:name=".CardsActivity"
-            android:exported="false" />
         <activity
             android:name=".SettingsActivity"
             android:exported="false"

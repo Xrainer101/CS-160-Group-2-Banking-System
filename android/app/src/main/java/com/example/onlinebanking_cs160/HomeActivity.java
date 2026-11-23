@@ -34,7 +34,6 @@ import database.User;
 
 // Home screen shown after a successful login (based on the team's homepage design)
 public class HomeActivity extends AppCompatActivity {
-    private static final int MENU_CARDS = 1;
     private static final int MENU_SETTINGS = 2;
     private static final int MENU_LOG_OUT = 3;
 
@@ -293,8 +292,6 @@ public class HomeActivity extends AppCompatActivity {
                         (Runnable) () -> startActivity(new Intent(this, CheckDepositActivity.class))},
                 {R.drawable.ic_atm, "Find ATM", "Chase ATMs near you",
                         (Runnable) () -> startActivity(new Intent(this, AtmFinderActivity.class))},
-                {R.drawable.ic_card, "My Cards", "Freeze or replace",
-                        (Runnable) () -> startActivity(new Intent(this, CardsActivity.class))},
                 {R.drawable.ic_list, "Activity", "Search your history",
                         (Runnable) () -> startActivity(new Intent(this, TransactionsActivity.class))},
         };
@@ -329,6 +326,10 @@ public class HomeActivity extends AppCompatActivity {
             }
             row.addView(tile);
         }
+        if (actions.length % 2 == 1 && row != null) {
+            // Odd number of tiles: an empty space keeps the last tile half-width, like the others
+            row.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+        }
     }
 
     // ------------------------------------------------------------------
@@ -342,14 +343,10 @@ public class HomeActivity extends AppCompatActivity {
             if (!role.isEmpty()) role = Character.toUpperCase(role.charAt(0)) + role.substring(1);
             menu.getMenu().add(0, 0, 0, currentUser.getFullName() + " · " + role).setEnabled(false);
         }
-        menu.getMenu().add(0, MENU_CARDS, 1, "My Cards");
         menu.getMenu().add(0, MENU_SETTINGS, 2, "Settings");
         menu.getMenu().add(0, MENU_LOG_OUT, 3, "Log out");
         menu.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
-                case MENU_CARDS:
-                    startActivity(new Intent(this, CardsActivity.class));
-                    return true;
                 case MENU_SETTINGS:
                     startActivity(new Intent(this, SettingsActivity.class));
                     return true;

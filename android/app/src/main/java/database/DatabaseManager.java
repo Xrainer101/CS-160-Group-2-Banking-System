@@ -42,6 +42,7 @@ public class DatabaseManager extends SQLiteOpenHelper {
     // 7: scheduled_payments can repeat daily/weekly/monthly/yearly, every N (repeat_every)
     // 8: cards table (real card numbers, replacement), deposited_checks table (no double deposits),
     //    scheduled_payments.kind/to_account_number/to_routing_number/memo (scheduled transfers)
+    // 9: debit cards removed (cards table dropped; freezing went with them)
     //    (upgrades from 3 and up keep existing data, see onUpgrade)
     private static final int DATABASE_VERSION = 9;
 
@@ -55,11 +56,7 @@ public class DatabaseManager extends SQLiteOpenHelper {
     private static final String TABLE_BANK_ACCOUNTS = "bank_accounts";
     private static final String TABLE_TRANSACTIONS = "transactions";
     private static final String TABLE_SCHEDULED_PAYMENTS = "scheduled_payments";
-    private static final String TABLE_CARDS = "cards";
     private static final String TABLE_DEPOSITED_CHECKS = "deposited_checks";
-
-    // Stable Auth0 identity; never equate backend and local numeric user IDs.
-    private static final String COL_AUTH0_SUB = "auth0_sub";
 
     // users
     private static final String COL_USER_ID = "user_id";
@@ -74,8 +71,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
     private static final String COL_FAILED_LOGIN_ATTEMPTS = "login_attempts";
     private static final String COL_LOCKOUT_UNTIL = "lockout_until";
     private static final String COL_LAST_LOGIN_AT = "last_login_at";
-    // Before version 8 the card's frozen state lived here; now it's cards.status (kept for old databases)
-    private static final String COL_CARD_FROZEN = "card_frozen";
     private static final String COL_CREATED_AT = "created_at";
 
     // bank_accounts
@@ -110,13 +105,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
     private static final String COL_TO_ROUTING_NUMBER = "to_routing_number";
     private static final String COL_MEMO = "memo";
 
-    // cards
-    private static final String COL_CARD_ID = "card_id";
-    private static final String COL_CARD_NUMBER = "card_number";
-    private static final String COL_EXPIRES = "expires";
-    private static final String COL_CARD_STATUS = "status";
-    private static final String COL_REPLACED_AT = "replaced_at";
-
     // deposited_checks
     private static final String COL_CHECK_ID = "check_id";
     private static final String COL_CHECK_KEY = "check_key";
@@ -140,7 +128,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
     // COLLATE NOCASE makes "Jane" and "jane" count as the same username/email
     private static final String CREATE_USERS = "CREATE TABLE IF NOT EXISTS " + TABLE_USERS + " ("
             + COL_USER_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
-            + COL_AUTH0_SUB + " TEXT UNIQUE, "
             + COL_USERNAME + " TEXT NOT NULL UNIQUE COLLATE NOCASE, "
             + COL_FIRST_NAME + " TEXT NOT NULL, "
             + COL_LAST_NAME + " TEXT NOT NULL, "
@@ -154,7 +141,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
             + COL_LOCKOUT_UNTIL + " DATETIME DEFAULT NULL, "
             // Time of the most recent successful login, in milliseconds since 1970
             + COL_LAST_LOGIN_AT + " INTEGER DEFAULT NULL, "
-            + COL_CARD_FROZEN + " INTEGER NOT NULL DEFAULT 0, "
             + COL_CREATED_AT + " TIMESTAMP DEFAULT CURRENT_TIMESTAMP "
             + ");";
 
@@ -223,21 +209,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
                 + ");";
     }
 
-    // Debit cards. One 'active' or 'frozen' card per user, linked to a checking account.
-    // Replaced or cancelled cards stay for history.
-    private static final String CREATE_CARDS = "CREATE TABLE IF NOT EXISTS " + TABLE_CARDS + " ("
-            + COL_CARD_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
-            + COL_USER_ID + " INTEGER NOT NULL, "
-            + COL_ACCOUNT_NUMBER + " TEXT NOT NULL, "
-            + COL_CARD_NUMBER + " TEXT NOT NULL UNIQUE, "
-            + COL_EXPIRES + " TEXT NOT NULL, "
-            + COL_CARD_STATUS + " TEXT NOT NULL DEFAULT 'active' "
-            + "CHECK(status IN ('active', 'frozen', 'replaced', 'cancelled')), "
-            + COL_CREATED_AT + " TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
-            + COL_REPLACED_AT + " INTEGER DEFAULT NULL, "
-            + "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE"
-            + ");";
-
     // Checks deposited by photo. check_key = "routing-account-checkNumber" from the check, so the
     // same check can't be deposited twice (NULL when those details weren't all available).
     private static final String CREATE_DEPOSITED_CHECKS = "CREATE TABLE IF NOT EXISTS " + TABLE_DEPOSITED_CHECKS + " ("
@@ -279,7 +250,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
         db.execSQL(CREATE_TRANSACTIONS);
         db.execSQL(CREATE_TRANSACTIONS_INDEX);
         db.execSQL(CREATE_SCHEDULED_PAYMENTS);
-        db.execSQL(CREATE_CARDS);
         db.execSQL(CREATE_DEPOSITED_CHECKS);
     }
 
@@ -289,7 +259,7 @@ public class DatabaseManager extends SQLiteOpenHelper {
             // Very old development database: wipe and rebuild.
             // Drop child tables first because of the foreign keys.
             db.execSQL("DROP TABLE IF EXISTS " + TABLE_DEPOSITED_CHECKS);
-            db.execSQL("DROP TABLE IF EXISTS " + TABLE_CARDS);
+            db.execSQL("DROP TABLE IF EXISTS cards"); // from version 8
             db.execSQL("DROP TABLE IF EXISTS " + TABLE_SCHEDULED_PAYMENTS);
             db.execSQL("DROP TABLE IF EXISTS " + TABLE_TRANSACTIONS);
             db.execSQL("DROP TABLE IF EXISTS " + TABLE_BANK_ACCOUNTS);
@@ -297,16 +267,11 @@ public class DatabaseManager extends SQLiteOpenHelper {
             onCreate(db);
             return;
         }
-        if (oldVersion < 9) {
-            db.execSQL("ALTER TABLE " + TABLE_USERS + " ADD COLUMN " + COL_AUTH0_SUB + " TEXT");
-            db.execSQL("CREATE UNIQUE INDEX idx_users_auth0_sub ON " + TABLE_USERS + " (" + COL_AUTH0_SUB + ")");
-        }
         // From here on, each step adds what the next version needs and keeps everyone's data
         if (oldVersion < 4) {
             db.execSQL("ALTER TABLE " + TABLE_USERS + " ADD COLUMN " + COL_LAST_LOGIN_AT + " INTEGER DEFAULT NULL");
         }
         if (oldVersion < 5) {
-            db.execSQL("ALTER TABLE " + TABLE_USERS + " ADD COLUMN " + COL_CARD_FROZEN + " INTEGER NOT NULL DEFAULT 0");
             db.execSQL("ALTER TABLE " + TABLE_BANK_ACCOUNTS + " ADD COLUMN " + COL_ROUTING_NUMBER
                     + " TEXT NOT NULL DEFAULT '" + BANK_ROUTING_NUMBER + "'");
             db.execSQL("ALTER TABLE " + TABLE_BANK_ACCOUNTS + " ADD COLUMN " + COL_STATUS
@@ -348,19 +313,12 @@ public class DatabaseManager extends SQLiteOpenHelper {
             addColumnIfMissing(db, TABLE_SCHEDULED_PAYMENTS, COL_TO_ACCOUNT_NUMBER, "TEXT DEFAULT NULL");
             addColumnIfMissing(db, TABLE_SCHEDULED_PAYMENTS, COL_TO_ROUTING_NUMBER, "TEXT DEFAULT NULL");
             addColumnIfMissing(db, TABLE_SCHEDULED_PAYMENTS, COL_MEMO, "TEXT DEFAULT NULL");
-            db.execSQL(CREATE_CARDS);
             db.execSQL(CREATE_DEPOSITED_CHECKS);
-            // Give everyone with a checking account a card, frozen if they'd frozen it before
-            List<long[]> users = new ArrayList<>();
-            try (Cursor c = db.rawQuery("SELECT " + COL_USER_ID + ", " + COL_CARD_FROZEN + " FROM " + TABLE_USERS, null)) {
-                while (c.moveToNext()) users.add(new long[]{c.getLong(0), c.getLong(1)});
-            }
-            for (long[] u : users) {
-                Account checking = firstOpenChecking(db, u[0], null);
-                if (checking != null) {
-                    issueCard(db, u[0], checking.getAccountNumber(), u[1] == 1 ? Card.STATUS_FROZEN : Card.STATUS_ACTIVE);
-                }
-            }
+        }
+        if (oldVersion < 9) {
+            // Debit cards were removed from the app. Databases from versions 5 to 8 also keep an
+            // unused users.card_frozen column; SQLite can't easily drop it, and it does no harm.
+            db.execSQL("DROP TABLE IF EXISTS cards");
         }
     }
 
@@ -376,50 +334,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
     // ==================================================================
     // Registration
     // ==================================================================
-
-    /**
-     * Called only after the backend validates the Auth0 access token.
-     * Existing unlinked local users are never claimed by email or numeric ID.
-     */
-    public LoginResult loginAuth0User(String subject, String name, String email, String username) {
-        if (subject == null || subject.trim().isEmpty()) {
-            throw new IllegalArgumentException("The authenticated profile has no Auth0 identity.");
-        }
-        SQLiteDatabase db = getWritableDatabase();
-        db.beginTransaction();
-        try {
-            long userId;
-            long previousLogin = 0;
-            try (Cursor c = db.query(TABLE_USERS,
-                    new String[]{COL_USER_ID, COL_LAST_LOGIN_AT},
-                    COL_AUTH0_SUB + " = ?", new String[]{subject}, null, null, null)) {
-                userId = c.moveToFirst() ? c.getLong(0) : -1;
-                if (userId != -1 && !c.isNull(1)) previousLogin = c.getLong(1);
-            }
-            if (userId == -1) {
-                String[] names = (name == null ? "" : name.trim()).split("\\s+", 2);
-                ContentValues values = new ContentValues();
-                values.put(COL_AUTH0_SUB, subject);
-                values.put(COL_USERNAME, username);
-                values.put(COL_FIRST_NAME, names[0].isEmpty() ? username : names[0]);
-                values.put(COL_LAST_NAME, names.length > 1 ? names[1] : "");
-                values.put(COL_EMAIL, email);
-                // /auth/me does not return a phone. Reserve a unique placeholder until edited locally.
-                values.put(COL_PHONE_NUMBER, "auth0:" + subject);
-                values.put(COL_PASSWORD_HASH, "");
-                userId = db.insertOrThrow(TABLE_USERS, null, values);
-                insertAccount(db, userId, Account.TYPE_CHECKING);
-            }
-            ContentValues login = new ContentValues();
-            login.put(COL_LAST_LOGIN_AT, System.currentTimeMillis());
-            db.update(TABLE_USERS, login, COL_USER_ID + " = ?", new String[]{String.valueOf(userId)});
-            User user = getUserById(userId);
-            db.setTransactionSuccessful();
-            return new LoginResult(LoginResult.Status.SUCCESS, user, 0, 0, previousLogin);
-        } finally {
-            db.endTransaction();
-        }
-    }
 
     public enum RegisterResult { SUCCESS, USERNAME_TAKEN, EMAIL_TAKEN, PHONE_TAKEN, ERROR }
 
@@ -443,7 +357,7 @@ public class DatabaseManager extends SQLiteOpenHelper {
         values.put(COL_EMAIL, email);
         values.put(COL_PHONE_NUMBER, phoneNumber);
         values.put(COL_PASSWORD_HASH, PasswordUtils.hashPassword(password));
-        // role, login_attempts, lockout_until, card_frozen and created_at use their DEFAULT values
+        // role, login_attempts, lockout_until and created_at use their DEFAULT values
 
         SQLiteDatabase db = getWritableDatabase();
         // A transaction makes the user + their first account save together, or not at all
@@ -633,245 +547,106 @@ public class DatabaseManager extends SQLiteOpenHelper {
         }
     }
 
-    /**
-     * Deletes the user's profile. Like the team backend's deleteUser, ON DELETE CASCADE removes
-     * their accounts, transactions and scheduled payments too. For safety this only works when
-     * every open account is at $0.00, so no money disappears.
-     */
+    // ==================================================================
+    // Deleting a user (the whole profile, not one bank account)
+    // ==================================================================
+
+    /** What deleting this user's profile would remove. Shown on Settings before confirming. */
+    public ProfileDeletionCheck getProfileDeletionCheck(long userId) {
+        SQLiteDatabase db = getReadableDatabase();
+        List<Account> accounts = getAccountsForUser(userId);
+        int outgoing = count(db, "SELECT COUNT(*) FROM " + TABLE_SCHEDULED_PAYMENTS
+                        + " WHERE " + COL_USER_ID + " = ? AND " + COL_PAYMENT_STATUS + " IN ('scheduled', 'failed')",
+                String.valueOf(userId));
+        int incoming = count(db, "SELECT COUNT(*) FROM " + TABLE_SCHEDULED_PAYMENTS + " p JOIN "
+                        + TABLE_BANK_ACCOUNTS + " a ON a." + COL_ACCOUNT_NUMBER + " = p." + COL_TO_ACCOUNT_NUMBER
+                        + " WHERE a." + COL_USER_ID + " = ? AND p." + COL_USER_ID + " != ?"
+                        + " AND (p." + COL_TO_ROUTING_NUMBER + " IS NULL OR p." + COL_TO_ROUTING_NUMBER + " = ?)"
+                        + " AND p." + COL_PAYMENT_STATUS + " IN ('scheduled', 'failed')",
+                String.valueOf(userId), String.valueOf(userId), BANK_ROUTING_NUMBER);
+        return new ProfileDeletionCheck(accounts, outgoing, incoming);
+    }
+
+    private static int count(SQLiteDatabase db, String sql, String... args) {
+        try (Cursor c = db.rawQuery(sql, args)) {
+            return c.moveToFirst() ? c.getInt(0) : 0;
+        }
+    }
+
+    /** Deletes the profile only if every account is at $0.00. */
     public OperationResult deleteUser(long userId, String password) {
-        if (!checkPassword(userId, password)) {
+        return deleteUser(userId, password, false);
+    }
+
+    /**
+     * Permanently deletes a user: their profile, every bank account (open or closed), transaction
+     * history, scheduled bills and transfers, and check deposit records. Afterwards
+     * the username, email and phone number can be used to register again.
+     *
+     * Money left in the accounts: if cashOut is false the delete is refused, so no money
+     * disappears by accident. If cashOut is true the remaining balance is paid out to the user
+     * (a real bank would mail a check or send it to another bank) and then everything is deleted.
+     *
+     * Other customers' scheduled transfers into this user's accounts are cancelled, since those
+     * accounts won't exist. Their past transactions with this user stay in THEIR history.
+     *
+     * It all happens in one database transaction: either everything is deleted or nothing is.
+     */
+    public OperationResult deleteUser(long userId, String password, boolean cashOut) {
+        if (password == null || !checkPassword(userId, password)) {
             return OperationResult.fail("Incorrect password.");
         }
-        for (Account account : getAccountsForUser(userId)) {
-            if (toCents(account.getBalance()) != 0) {
-                return OperationResult.fail("Your " + account.getDisplayName() + " still has "
-                        + money(account.getBalance()) + ". Withdraw or transfer it out first.");
-            }
+        ProfileDeletionCheck check = getProfileDeletionCheck(userId);
+        if (check.hasMoneyLeft() && !cashOut) {
+            Account first = check.accountsWithMoney.get(0);
+            return OperationResult.fail(check.accountsWithMoney.size() == 1
+                    ? "Your " + first.getDisplayName() + " still has " + money(first.getBalance())
+                    + ". Move it out first, or choose to cash out."
+                    : "Your accounts still have " + money(check.totalBalance)
+                    + " in total. Move it out first, or choose to cash out.");
         }
-        int rows = getWritableDatabase().delete(TABLE_USERS,
-                COL_USER_ID + " = ?", new String[]{String.valueOf(userId)});
-        return rows == 1 ? OperationResult.ok("Your profile was deleted.")
-                : OperationResult.fail("Your profile could not be found.");
-    }
 
-    // ==================================================================
-    // Debit card (My Cards screen)
-    // ==================================================================
-
-    private static final String CARD_COLUMNS = COL_CARD_ID + ", " + COL_USER_ID + ", " + COL_ACCOUNT_NUMBER + ", "
-            + COL_CARD_NUMBER + ", " + COL_EXPIRES + ", " + COL_CARD_STATUS;
-
-    private static Card readCard(Cursor c) {
-        return new Card(c.getLong(0), c.getLong(1), c.getString(2), c.getString(3), c.getString(4), c.getString(5));
-    }
-
-    /** The user's card that's in use ('active' or 'frozen'), or null. */
-    @Nullable
-    private Card currentCard(SQLiteDatabase db, long userId) {
-        try (Cursor c = db.rawQuery("SELECT " + CARD_COLUMNS + " FROM " + TABLE_CARDS
-                        + " WHERE " + COL_USER_ID + " = ? AND " + COL_CARD_STATUS + " IN ('active', 'frozen')"
-                        + " ORDER BY " + COL_CARD_ID + " DESC LIMIT 1",
-                new String[]{String.valueOf(userId)})) {
-            return c.moveToFirst() ? readCard(c) : null;
-        }
-    }
-
-    /**
-     * The user's debit card. Anyone with an open checking account has one: if they don't yet, a
-     * card is issued now (linked to their first checking account). Null if they have no checking.
-     */
-    @Nullable
-    public Card getCard(long userId) {
         SQLiteDatabase db = getWritableDatabase();
-        Card card = currentCard(db, userId);
-        if (card != null) {
-            Account linked = findAccount(db, card.getAccountNumber());
-            if (linked != null && !linked.isClosed()) return card;
-            // Its account was closed: move the card to another checking account, or cancel it
-            relinkOrCancelCard(db, card, null);
-            return currentCard(db, userId);
-        }
-        Account checking = firstOpenChecking(db, userId, null);
-        if (checking == null) return null;
-        issueCard(db, userId, checking.getAccountNumber(), Card.STATUS_ACTIVE);
-        return currentCard(db, userId);
-    }
-
-    public boolean isCardFrozen(long userId) {
-        Card card = getCard(userId);
-        return card != null && card.isFrozen();
-    }
-
-    /**
-     * Freezes or unfreezes the card. While it's frozen, deposits, withdrawals, bill payments and
-     * transfers (in or out, now or scheduled) on its checking account are all blocked.
-     */
-    public OperationResult setCardFrozen(long userId, boolean frozen) {
-        Card card = getCard(userId);
-        if (card == null) return OperationResult.fail("You don't have a debit card yet.");
-        ContentValues values = new ContentValues();
-        values.put(COL_CARD_STATUS, frozen ? Card.STATUS_FROZEN : Card.STATUS_ACTIVE);
-        getWritableDatabase().update(TABLE_CARDS, values, COL_CARD_ID + " = ?",
-                new String[]{String.valueOf(card.getCardId())});
-        return OperationResult.ok(frozen ? "Card frozen." : "Card unfrozen.");
-    }
-
-    /**
-     * Replaces the card, as a bank does after a card is lost or stolen: a new card with a new
-     * number, AND a new checking account with a new account number. The old account's money and
-     * its scheduled bills/transfers move to the new account, then the old account is closed and
-     * the old card stops working. All in one database transaction.
-     */
-    public OperationResult replaceCard(long userId) {
-        SQLiteDatabase db = getWritableDatabase();
-        Card oldCard = getCard(userId);
-        if (oldCard == null) return OperationResult.fail("You don't have a debit card to replace.");
-
+        String id = String.valueOf(userId);
+        // All of the user's account numbers, closed ones included
+        String myAccounts = "SELECT " + COL_ACCOUNT_NUMBER + " FROM " + TABLE_BANK_ACCOUNTS
+                + " WHERE " + COL_USER_ID + " = ?";
         db.beginTransaction();
         try {
-            Account oldAccount = findAccount(db, oldCard.getAccountNumber());
-            if (oldAccount == null || oldAccount.isClosed()) {
-                return OperationResult.fail("The card's account could not be found.");
-            }
-            if (oldAccount.isFrozen()) {
-                return OperationResult.fail("This account is frozen by the bank, so the card can't be replaced in the app.");
-            }
-            String oldNumber = oldAccount.getAccountNumber();
-            Account newAccount = insertAccount(db, userId, Account.TYPE_CHECKING);
-            String newNumber = newAccount.getAccountNumber();
-
-            // 1. Move the money
-            double balance = oldAccount.getBalance();
-            if (toCents(balance) != 0) {
-                changeBalance(db, oldNumber, -balance);
-                logTransaction(db, oldNumber, Transaction.TYPE_TRANSFER_OUT, balance, newNumber,
-                        "Moved to new " + newAccount.getDisplayName() + " (card replaced)");
-                changeBalance(db, newNumber, balance);
-                logTransaction(db, newNumber, Transaction.TYPE_TRANSFER_IN, balance, oldNumber,
-                        "Moved from old " + oldAccount.getDisplayName() + " (card replaced)");
-            }
-
-            // 2. Point scheduled bills/transfers at the new account
-            ContentValues from = new ContentValues();
-            from.put(COL_ACCOUNT_NUMBER, newNumber);
-            int moved = db.update(TABLE_SCHEDULED_PAYMENTS, from,
-                    COL_ACCOUNT_NUMBER + " = ? AND " + COL_PAYMENT_STATUS + " IN ('scheduled', 'failed')",
-                    new String[]{oldNumber});
-            ContentValues to = new ContentValues();
-            to.put(COL_TO_ACCOUNT_NUMBER, newNumber);
-            db.update(TABLE_SCHEDULED_PAYMENTS, to,
-                    COL_TO_ACCOUNT_NUMBER + " = ? AND " + COL_TO_ROUTING_NUMBER + " IS NULL AND "
+            // 1. Other customers' scheduled transfers to this user can't be sent any more
+            ContentValues cancel = new ContentValues();
+            cancel.put(COL_PAYMENT_STATUS, ScheduledPayment.STATUS_CANCELLED);
+            int incomingCancelled = db.update(TABLE_SCHEDULED_PAYMENTS, cancel,
+                    COL_USER_ID + " != ? AND " + COL_TO_ACCOUNT_NUMBER + " IN (" + myAccounts + ") AND ("
+                            + COL_TO_ROUTING_NUMBER + " IS NULL OR " + COL_TO_ROUTING_NUMBER + " = ?) AND "
                             + COL_PAYMENT_STATUS + " IN ('scheduled', 'failed')",
-                    new String[]{oldNumber});
+                    new String[]{id, id, BANK_ROUTING_NUMBER});
 
-            // 3. Close the old account
-            ContentValues closed = new ContentValues();
-            closed.put(COL_STATUS, Account.STATUS_CLOSED);
-            closed.put(COL_CLOSED_AT, System.currentTimeMillis());
-            db.update(TABLE_BANK_ACCOUNTS, closed, COL_ACCOUNT_NUMBER + " = ?", new String[]{oldNumber});
-
-            // 4. Retire the old card and issue the new one
-            ContentValues retired = new ContentValues();
-            retired.put(COL_CARD_STATUS, Card.STATUS_REPLACED);
-            retired.put(COL_REPLACED_AT, System.currentTimeMillis());
-            db.update(TABLE_CARDS, retired, COL_CARD_ID + " = ?", new String[]{String.valueOf(oldCard.getCardId())});
-            issueCard(db, userId, newNumber, Card.STATUS_ACTIVE);
-            Card newCard = currentCard(db, userId);
+            // 2. Delete everything that belongs to the user. Done one table at a time (children
+            //    first) rather than relying on ON DELETE CASCADE, so it also works on databases
+            //    created by older versions of the app.
+            db.delete(TABLE_TRANSACTIONS, COL_ACCOUNT_NUMBER + " IN (" + myAccounts + ")", new String[]{id});
+            db.delete(TABLE_SCHEDULED_PAYMENTS, COL_USER_ID + " = ? OR " + COL_ACCOUNT_NUMBER
+                    + " IN (" + myAccounts + ")", new String[]{id, id});
+            db.delete(TABLE_DEPOSITED_CHECKS, COL_USER_ID + " = ?", new String[]{id});
+            db.delete(TABLE_BANK_ACCOUNTS, COL_USER_ID + " = ?", new String[]{id});
+            int rows = db.delete(TABLE_USERS, COL_USER_ID + " = ?", new String[]{id});
+            if (rows != 1) return OperationResult.fail("Your profile could not be found.");
 
             db.setTransactionSuccessful();
-            StringBuilder message = new StringBuilder("Your new card ends in ")
-                    .append(newCard == null ? "" : newCard.getLastFour())
-                    .append(" and your new checking account ends in ")
-                    .append(newNumber.substring(newNumber.length() - 4)).append(".");
-            if (toCents(balance) != 0) message.append(" Your ").append(money(balance)).append(" balance moved over.");
-            if (moved > 0) {
-                message.append(" ").append(moved).append(moved == 1 ? " scheduled payment" : " scheduled payments")
-                        .append(" now come from the new account.");
+            StringBuilder message = new StringBuilder("Your profile was deleted.");
+            if (check.hasMoneyLeft()) {
+                message.append(" ").append(money(check.totalBalance)).append(" was paid out to you.");
             }
-            message.append(" Checking •••• ").append(oldNumber.substring(oldNumber.length() - 4)).append(" is closed.");
+            if (incomingCancelled > 0) {
+                message.append(" ").append(incomingCancelled).append(incomingCancelled == 1
+                        ? " scheduled transfer to you from another customer was"
+                        : " scheduled transfers to you from other customers were").append(" cancelled.");
+            }
             return OperationResult.ok(message.toString());
         } finally {
             db.endTransaction();
         }
-    }
-
-    /** Inserts a new card with a fresh number, expiring in 4 years. */
-    private static void issueCard(SQLiteDatabase db, long userId, String accountNumber, String status) {
-        Calendar expires = Calendar.getInstance();
-        expires.add(Calendar.YEAR, 4);
-        String expiry = new SimpleDateFormat("MM/yy", Locale.US).format(expires.getTime());
-        for (int attempt = 0; attempt < 5; attempt++) {
-            ContentValues values = new ContentValues();
-            values.put(COL_USER_ID, userId);
-            values.put(COL_ACCOUNT_NUMBER, accountNumber);
-            values.put(COL_CARD_NUMBER, generateCardNumber());
-            values.put(COL_EXPIRES, expiry);
-            values.put(COL_CARD_STATUS, status);
-            try {
-                db.insertOrThrow(TABLE_CARDS, null, values);
-                return;
-            } catch (SQLiteConstraintException duplicateNumber) {
-                // try another number
-            }
-        }
-        throw new IllegalStateException("Could not generate a unique card number");
-    }
-
-    /**
-     * A 16-digit card number starting with 4 whose last digit is a valid Luhn check digit
-     * (the checksum real card numbers use).
-     */
-    public static String generateCardNumber() {
-        SecureRandom random = new SecureRandom();
-        StringBuilder sb = new StringBuilder("4");
-        while (sb.length() < 15) sb.append(random.nextInt(10));
-        sb.append(luhnCheckDigit(sb.toString()));
-        return sb.toString();
-    }
-
-    static int luhnCheckDigit(String first15) {
-        int sum = 0;
-        // Double every second digit from the right, starting with the rightmost of these 15
-        for (int i = 0; i < first15.length(); i++) {
-            int digit = first15.charAt(first15.length() - 1 - i) - '0';
-            if (i % 2 == 0) {
-                digit *= 2;
-                if (digit > 9) digit -= 9;
-            }
-            sum += digit;
-        }
-        return (10 - sum % 10) % 10;
-    }
-
-    public static boolean isValidLuhn(String number) {
-        if (number == null || !number.matches("\\d{12,19}")) return false;
-        return luhnCheckDigit(number.substring(0, number.length() - 1)) == number.charAt(number.length() - 1) - '0';
-    }
-
-    /** Moves the card to another open checking account of the user, or cancels it if there's none. */
-    private void relinkOrCancelCard(SQLiteDatabase db, Card card, @Nullable String notThisAccount) {
-        Account other = firstOpenChecking(db, card.getUserId(),
-                notThisAccount != null ? notThisAccount : card.getAccountNumber());
-        ContentValues values = new ContentValues();
-        if (other != null) {
-            values.put(COL_ACCOUNT_NUMBER, other.getAccountNumber());
-        } else {
-            values.put(COL_CARD_STATUS, Card.STATUS_CANCELLED);
-        }
-        db.update(TABLE_CARDS, values, COL_CARD_ID + " = ?", new String[]{String.valueOf(card.getCardId())});
-    }
-
-    /** Null if money can move this way on the account; otherwise why not (its card is frozen). */
-    @Nullable
-    private static String cardFreezeError(SQLiteDatabase db, String accountNumber, String what) {
-        try (Cursor c = db.rawQuery("SELECT 1 FROM " + TABLE_CARDS + " WHERE " + COL_ACCOUNT_NUMBER
-                + " = ? AND " + COL_CARD_STATUS + " = 'frozen' LIMIT 1", new String[]{accountNumber})) {
-            if (c.moveToFirst()) {
-                return "The debit card for this account is frozen, so " + what
-                        + " are paused. Unfreeze it on My Cards to continue.";
-            }
-        }
-        return null;
     }
 
     // ==================================================================
@@ -918,18 +693,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
         }
     }
 
-    /** The user's oldest open checking account, skipping notThisOne. Null if none. */
-    @Nullable
-    private static Account firstOpenChecking(SQLiteDatabase db, long userId, @Nullable String notThisOne) {
-        try (Cursor c = db.rawQuery("SELECT " + ACCOUNT_COLUMNS + " FROM " + TABLE_BANK_ACCOUNTS
-                        + " WHERE " + COL_USER_ID + " = ? AND " + COL_ACCOUNT_TYPE + " = 'checking' AND "
-                        + COL_STATUS + " != 'closed' AND " + COL_ACCOUNT_NUMBER + " != ?"
-                        + " ORDER BY " + COL_ACCOUNT_ID + " ASC LIMIT 1",
-                new String[]{String.valueOf(userId), notThisOne == null ? "" : notThisOne})) {
-            return c.moveToFirst() ? readAccount(c) : null;
-        }
-    }
-
     /** Opens a new $0.00 account ("checking" or "savings"). Returns null if it couldn't be saved. */
     @Nullable
     public Account openAccount(long userId, String accountType) {
@@ -972,7 +735,7 @@ public class DatabaseManager extends SQLiteOpenHelper {
 
     /**
      * Everything the Remove Account screen needs to check first: money left, bills and transfers
-     * paid from the account, transfers scheduled into it, the debit card, and whether it's the
+     * paid from the account, transfers scheduled into it, and whether it's the
      * user's last account. Null if the account isn't the user's or is already closed.
      */
     @Nullable
@@ -988,11 +751,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
             } else if (p.isTransfer() && p.getToRoutingNumber() == null && accountNumber.equals(p.getToAccountNumber())) {
                 check.incoming.add(p);
             }
-        }
-        Card card = currentCard(db, userId);
-        if (card != null && accountNumber.equals(card.getAccountNumber())) {
-            check.linkedCard = card;
-            check.cardMovesTo = firstOpenChecking(db, userId, accountNumber);
         }
         for (Account other : getAccountsForUser(userId)) {
             if (!other.getAccountNumber().equals(accountNumber)) check.otherAccounts.add(other);
@@ -1011,11 +769,10 @@ public class DatabaseManager extends SQLiteOpenHelper {
      *
      * moveScheduledTo: another of the user's accounts to move this account's scheduled bills and
      * transfers to. Null cancels them instead. Transfers scheduled INTO this account are always
-     * cancelled. A debit card linked to it moves to another checking account, or is cancelled.
+     * cancelled.
      */
     public OperationResult closeAccount(long userId, String accountNumber, @Nullable String moveScheduledTo) {
         SQLiteDatabase db = getWritableDatabase();
-        Card card = currentCard(db, userId);
         db.beginTransaction();
         try {
             Account account = findAccount(db, accountNumber);
@@ -1060,14 +817,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
                             + COL_PAYMENT_STATUS + " IN (?, ?)",
                     new String[]{accountNumber, open[0], open[1]});
 
-            String cardNote = "";
-            if (card != null && accountNumber.equals(card.getAccountNumber())) {
-                Account other = firstOpenChecking(db, userId, accountNumber);
-                relinkOrCancelCard(db, card, accountNumber);
-                cardNote = other != null
-                        ? " Your debit card now uses " + other.getDisplayName() + "."
-                        : " Your debit card was cancelled.";
-            }
 
             ContentValues values = new ContentValues();
             values.put(COL_STATUS, Account.STATUS_CLOSED);
@@ -1078,7 +827,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
             StringBuilder message = new StringBuilder(account.getDisplayName()).append(" removed.");
             if (moved > 0) message.append(" ").append(moved).append(" scheduled ").append(moved == 1 ? "payment" : "payments").append(" moved.");
             if (cancelled > 0) message.append(" ").append(cancelled).append(" scheduled ").append(cancelled == 1 ? "payment" : "payments").append(" cancelled.");
-            message.append(cardNote);
             return OperationResult.ok(message.toString());
         } finally {
             db.endTransaction();
@@ -1109,7 +857,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
                                         String description) {
         Account account = findAccount(db, accountNumber);
         String error = checkCanUse(account, userId);
-        if (error == null) error = cardFreezeError(db, accountNumber, "deposits");
         if (error != null) return OperationResult.fail(error);
 
         double newBalance = changeBalance(db, accountNumber, amount);
@@ -1196,7 +943,7 @@ public class DatabaseManager extends SQLiteOpenHelper {
         if (payer.getAccountNumber().equals(depositAccount)) {
             return "A check can't be deposited into the same account it's written on.";
         }
-        if (!payer.isActive() || cardFreezeError(db, payer.getAccountNumber(), "payments") != null) {
+        if (!payer.isActive()) {
             return "The account this check is written on can't pay it right now.";
         }
         if (toCents(payer.getBalance()) < toCents(amount)) {
@@ -1267,7 +1014,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
         try {
             Account account = findAccount(db, accountNumber);
             String error = checkCanUse(account, userId);
-            if (error == null) error = cardFreezeError(db, accountNumber, "withdrawals");
             if (error != null) return OperationResult.fail(error);
             if (toCents(account.getBalance()) < toCents(amount)) {
                 return OperationResult.fail("Not enough money. Your " + account.getDisplayName()
@@ -1315,7 +1061,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
         }
         Account from = findAccount(db, fromAccountNumber);
         String error = checkCanUse(from, userId);
-        if (error == null) error = cardFreezeError(db, fromAccountNumber, "transfers");
         if (error != null) return OperationResult.fail(error);
 
         Account to = findAccount(db, toAccountNumber);
@@ -1324,13 +1069,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
         }
         if (!to.isActive()) {
             return OperationResult.fail("The receiving account can't accept money right now.");
-        }
-        // A frozen card blocks transfers INTO its account too
-        if (cardFreezeError(db, toAccountNumber, "transfers") != null) {
-            return OperationResult.fail(to.getUserId() == userId
-                    ? "The debit card for your " + to.getDisplayName() + " is frozen, so it can't receive "
-                    + "transfers. Unfreeze it on My Cards to continue."
-                    : "The receiving account can't accept money right now.");
         }
         if (toCents(from.getBalance()) < toCents(amount)) {
             return OperationResult.fail("Not enough money. Your " + from.getDisplayName()
@@ -1396,7 +1134,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
                                                  @Nullable String memo, String note) {
         Account from = findAccount(db, fromAccountNumber);
         String error = checkCanUse(from, userId);
-        if (error == null) error = cardFreezeError(db, fromAccountNumber, "transfers");
         if (error != null) return OperationResult.fail(error);
         if (toCents(from.getBalance()) < toCents(amount)) {
             return OperationResult.fail("Not enough money. Your " + from.getDisplayName()
@@ -1913,9 +1650,6 @@ public class DatabaseManager extends SQLiteOpenHelper {
             } else {
                 Account account = findAccount(db, p.getAccountNumber());
                 reason = checkCanUse(account, userId);
-                // Frozen card: the bill isn't paid. It's marked failed with this reason, so it can
-                // be paid with "Try again now" once the card is unfrozen.
-                if (reason == null) reason = cardFreezeError(db, p.getAccountNumber(), "bill payments");
                 if (reason == null && toCents(account.getBalance()) < toCents(p.getAmount())) {
                     reason = "Not enough money in " + account.getDisplayName() + ".";
                 }

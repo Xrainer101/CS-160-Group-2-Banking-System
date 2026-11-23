@@ -1,7 +1,5 @@
 package database;
 
-import androidx.annotation.Nullable;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,10 +14,6 @@ public class AccountRemovalCheck {
     public final List<ScheduledPayment> outgoing = new ArrayList<>();
     /** Scheduled transfers that send money INTO this account (from the user's other accounts). */
     public final List<ScheduledPayment> incoming = new ArrayList<>();
-    /** The debit card linked to this account, or null. */
-    @Nullable public Card linkedCard;
-    /** The checking account the card would move to, or null if the card would be cancelled. */
-    @Nullable public Account cardMovesTo;
     /** The user's other open accounts (where scheduled payments could be moved). */
     public final List<Account> otherAccounts = new ArrayList<>();
 
