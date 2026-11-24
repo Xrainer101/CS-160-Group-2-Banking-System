@@ -5,7 +5,6 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.List;
 
 public class DatabaseManager {
     // This will create a file named "bank.db" in your project root directory
@@ -111,24 +110,6 @@ public class DatabaseManager {
             stmt.execute(createTransactionsTable);
 
             System.out.println("Transactions table created successfully.");
-
-            // Credit cards table
-            String createCardsTable = "CREATE TABLE IF NOT EXISTS credit_cards (" +
-                "card_id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                "user_id INTEGER NOT NULL," +
-                "card_nickname TEXT DEFAULT NULL," +
-                "cardholder_name TEXT NOT NULL," +
-                "card_number TEXT NOT NULL UNIQUE," +
-                "expiration_date TEXT NOT NULL," +
-                "cvv TEXT NOT NULL," +
-                "credit_limit REAL NOT NULL DEFAULT 5000.00," +
-                "current_balance REAL NOT NULL DEFAULT 0.00," +
-                "status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'frozen', 'closed'))," +
-                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
-                "FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE);";
-            stmt.execute(createCardsTable);
-
-            System.out.println("Cards table created successfully.");
 
             System.out.println("Database and tables created successfully.");
 
@@ -420,62 +401,5 @@ public class DatabaseManager {
 
         // System.out.println("\n=== 7. TEARDOWN: Cleaning Test User ===");
         // UserDAO.deleteUser("dana_bills");
-
-        System.out.println("=== 1. SETUP: Creating Test User ===");
-        UserDAO.registerUser("evan_cards", "Evan", "Miller", "evan@example.com", "5552229999", "hash_evan");
-        int userId = UserDAO.getUserIdByUsername("evan_cards");
-
-        System.out.println("\n=== 2. ADD CARD: Creating Credit Card & Testing Duplicate Guard ===");
-        boolean added = CreditCardDAO.addCreditCard(
-            userId, "Travel Rewards", "Evan Miller", "4532015112830366", "09/29", "842", 7500.00
-        );
-        System.out.println("Credit card added (expected true): " + added);
-
-        // Attempt to add the exact same card number again
-        boolean duplicateAdded = CreditCardDAO.addCreditCard(
-            userId, "Duplicate Card", "Evan Miller", "4532015112830366", "09/29", "842", 5000.00
-        );
-        System.out.println("Duplicate card blocked (expected false): " + duplicateAdded);
-
-        // Fetch dynamically to get the generated card_id
-        List<CreditCard> cards = CreditCardDAO.getCreditCardsByUserId(userId);
-        CreditCard card = cards.get(0);
-        int cardId = card.getCardId();
-
-        System.out.println("Fetched Card -> ID: " + cardId +
-                           " | Nickname: " + card.getCardNickname() +
-                           " | Masked: " + card.getMaskedCardNumber() +
-                           " | Limit: $" + String.format("%.2f", card.getCreditLimit()) +
-                           " | Status: " + card.getStatus());
-
-        System.out.println("\n=== 3. BALANCE UPDATE: Simulating Charges & Checking Available Credit ===");
-        boolean balanceUpdated = CreditCardDAO.updateCardBalance(cardId, 1250.50);
-        System.out.println("Balance updated (expected true): " + balanceUpdated);
-
-        CreditCard afterCharge = CreditCardDAO.getCreditCardsByUserId(userId).get(0);
-        System.out.println("Current Balance (expected $1250.50):   $" + String.format("%.2f", afterCharge.getCurrentBalance()));
-        System.out.println("Available Credit (expected $6249.50):  $" + String.format("%.2f", afterCharge.getAvailableCredit()));
-
-        // Guardrail check: negative balance should fail
-        boolean negativeBlocked = CreditCardDAO.updateCardBalance(cardId, -50.00);
-        System.out.println("Negative balance blocked (expected false): " + negativeBlocked);
-
-        System.out.println("\n=== 4. STATUS TOGGLE: Freezing & Reactivating Card ===");
-        CreditCardDAO.updateCardStatus(cardId, "frozen");
-        String frozenStatus = CreditCardDAO.getCreditCardsByUserId(userId).get(0).getStatus();
-        System.out.println("Status after freeze (expected frozen): " + frozenStatus);
-
-        CreditCardDAO.updateCardStatus(cardId, "active");
-        String activeStatus = CreditCardDAO.getCreditCardsByUserId(userId).get(0).getStatus();
-        System.out.println("Status after unfreeze (expected active): " + activeStatus);
-
-        // Guardrail check: invalid status string should fail
-        boolean invalidStatusBlocked = CreditCardDAO.updateCardStatus(cardId, "stolen");
-        System.out.println("Invalid status blocked (expected false): " + invalidStatusBlocked);
-
-        System.out.println("\n=== 5. TEARDOWN: Cleaning Test User (Cascades to Credit Cards) ===");
-        UserDAO.deleteUser("evan_cards");
-        System.out.println("Remaining cards for deleted user (expected 0): " +
-                           CreditCardDAO.getCreditCardsByUserId(userId).size());
     }
 }
