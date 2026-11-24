@@ -141,8 +141,7 @@ public class AccountDetailActivity extends AppCompatActivity {
      *  1. money left           -> must be moved out first (offers Transfer / Withdraw)
      *  2. scheduled payments   -> bills/transfers paid FROM it can move to another account or be cancelled
      *  3. incoming transfers   -> transfers scheduled INTO it will be cancelled
-     *  4. debit card           -> moves to another checking account, or is cancelled
-     *  5. last open account    -> warned
+     *  4. last open account    -> warned
      */
     private void confirmRemove() {
         if (account == null) return;
@@ -195,13 +194,6 @@ public class AccountDetailActivity extends AppCompatActivity {
                     .append(check.incoming.size() == 1 ? " scheduled transfer sends" : " scheduled transfers send")
                     .append(" money into this account. ").append(check.incoming.size() == 1 ? "It" : "They")
                     .append(" will be cancelled.");
-        }
-        if (check.linkedCard != null) {
-            message.append("\n\n• Your debit card •••• ").append(check.linkedCard.getLastFour())
-                    .append(" uses this account. ");
-            message.append(check.cardMovesTo != null
-                    ? "It will switch to your " + check.cardMovesTo.getDisplayName() + "."
-                    : "You have no other checking account, so the card will be cancelled.");
         }
         if (check.isLastAccount()) {
             message.append("\n\n• This is your last open account.");
