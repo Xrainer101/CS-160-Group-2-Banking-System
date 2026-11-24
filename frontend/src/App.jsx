@@ -22,7 +22,6 @@ import Transactions from "./pages/Transactions";
 import Transfers from "./pages/Transfers";
 import Payments from "./pages/Payments";
 import AccountMovement from "./pages/AccountMovement";
-import Cards from "./pages/Cards";
 import Settings from "./pages/Settings";
 import AdminPanel from "./pages/AdminPanel";
 
@@ -219,8 +218,6 @@ function AppContent() {
   const [payments, setPayments] =
     useState(() => isDemoSession() ? [...initialPayments] : []);
 
-  const [frozen, setFrozen] = useState(false);
-
   // ----------------------------------------------------
   // UI STATE
   // ----------------------------------------------------
@@ -303,7 +300,6 @@ function AppContent() {
     setTransactions([...initialTransactions]);
     setPayments([...initialPayments]);
 
-    setFrozen(false);
     setBankingLoading(false);
     setBankingError("");
 
@@ -1125,9 +1121,6 @@ function AppContent() {
     transactions,
     payments,
 
-    frozen,
-    setFrozen,
-
     notify,
     signOut,
 
@@ -1485,17 +1478,6 @@ function AppContent() {
                           }
                         />
                       )}
-
-                      {/* CARDS */}
-
-                      <Route
-                        path="/cards"
-                        element={
-                          <Cards
-                            {...shared}
-                          />
-                        }
-                      />
 
                       {/* SETTINGS */}
 

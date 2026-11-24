@@ -8,7 +8,6 @@ import {
   ArrowDown,
   ArrowUp,
   ListFilter,
-  CreditCard,
   ShieldCheck,
   ShieldUser,
   MapPinned,
@@ -26,7 +25,6 @@ const links = [
   ["/check-deposit", "Mobile Check Deposit", Camera],
   ["/withdraw", "Withdraw", ArrowUp],
   ["/atm-finder", "Find Chase ATMs", MapPinned],
-  ["/cards", "My Cards", CreditCard],
   ["/settings", "Settings", SlidersHorizontal],
 ];
 

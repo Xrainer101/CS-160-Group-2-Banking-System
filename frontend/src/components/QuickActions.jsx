@@ -6,7 +6,6 @@ import {
   DollarSign,
   ArrowDown,
   ArrowUp,
-  CreditCard,
   ListFilter,
   MapPinned,
 } from "lucide-react";
@@ -41,12 +40,6 @@ const actions = [
     "/payments",
     DollarSign,
     "Schedule a payment",
-  ],
-  [
-    "Manage cards",
-    "/cards",
-    CreditCard,
-    "Freeze or replace",
   ],
   [
     "View activity",

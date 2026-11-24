@@ -59,7 +59,7 @@ export default function SignIn({ onAuthenticated }) {
           <span className="auth-overline">BANKING, SIMPLIFIED</span>
           <h1>Everything you need to manage your money.</h1>
           <p>
-            One simple place for your accounts, transfers, cards and spending
+            One simple place for your accounts, transfers, and spending
             activity.
           </p>
           <div className="auth-feature">
