@@ -3,6 +3,9 @@ Software Engineering class project
 
 This README is the user guide for the Team 2 Online Banking System. It explains how to install and configure the system (section 2), how to use it (section 3), and lists the API status codes (section 4).
 
+## 0. How To Video Link
+https://drive.google.com/file/d/1DFeinio9g_hjP1lrJ_vWC0R7ZPUPegAi/view?usp=sharing
+
 ## 1. Overview
 
 | Part | Folder | Technology | Purpose |
@@ -119,6 +122,13 @@ From `backend/`, run `uv run python -m pytest tests`.
 | You want a clean database | Local: stop the backend, delete `bank.db`, and start it again. Docker: the data lives in the `banking-data` volume, so run `docker compose --env-file .env --env-file frontend/.env.local down -v` (this deletes all saved data) |
 
 ## 3. Using the Application
+
+### 3.0 Manager Sign in
+   
+   1. Set up duo mobile with the following QR code:
+![img.png](img.png)
+   2. sign in with the following info username: `sarah.johnson` and password: `Password1!`
+   3. The manager dashboard will open
 
 ### 3.1 Creating an account and signing in
 
