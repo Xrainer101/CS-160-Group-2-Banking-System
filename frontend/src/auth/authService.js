@@ -2,6 +2,7 @@ const domain = import.meta.env.VITE_AUTH0_DOMAIN;
 const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID;
 const audience = import.meta.env.VITE_AUTH0_AUDIENCE;
 const connection = import.meta.env.VITE_AUTH0_CONNECTION || 'Username-Password-Authentication';
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const sessionKey = 'team2bank.auth.session';
 
 function tokenUrl() {
@@ -29,6 +30,21 @@ async function requestToken(body) {
     });
     return readResponse(response);
 }
+// Check if the username has been deleted in the backend
+async function wasUsernameDeleted(username) {
+    try {
+        const response = await fetch(`${apiBaseUrl}/api/auth/check-deleted-username`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username }),
+        });
+        if (!response.ok) return false;
+        const data = await response.json().catch(() => ({}));
+        return data.deleted === true;
+    } catch {
+        return false;
+    }
+}
 
 // auth0 username and password login
 export async function login(username, password) {
@@ -52,6 +68,9 @@ export async function login(username, password) {
                 requiresMfa: true,
                 mfaToken: error.details.mfa_token,
             };
+        }
+        if (await wasUsernameDeleted(username)) {
+            throw new Error('Account has been deleted. Please contact support.');
         }
         throw error;
     }

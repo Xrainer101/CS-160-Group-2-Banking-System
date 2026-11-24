@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { CalendarDays } from 'lucide-react';
 import { money } from '../data/mockData';
 export default function UpcomingPayments({ payments }) {
+  const upcoming = payments.filter(payment => !payment.status || ['pending', 'scheduled'].includes(payment.status));
   return (
     <section className="panel">
       <div className="section-heading">
@@ -14,7 +15,7 @@ export default function UpcomingPayments({ payments }) {
         </Link>
       </div>
       <div className="payments-list">
-        {payments.slice(0, 4).map((p) => (
+        {upcoming.slice(0, 4).map((p) => (
           <div className="payment-row" key={p.id}>
             <span className="payment-icon">
               <CalendarDays size={20} />

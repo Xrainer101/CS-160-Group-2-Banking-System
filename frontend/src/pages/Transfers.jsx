@@ -1,10 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { createTransfer, getExternalAccounts } from '../api/bankingApi';
+import ExternalAccountModal from '../components/ExternalAccountModal';
 import { money } from '../data/mockData';
 
 const label = (account) => `${account.type} ${account.number}`;
-const tomorrowUtc = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+const pacificDate = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles',
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+});
+
+function tomorrowPacific() {
+  const parts = pacificDate.formatToParts(new Date());
+  const year = Number(parts.find((part) => part.type === 'year').value);
+  const month = Number(parts.find((part) => part.type === 'month').value);
+  const day = Number(parts.find((part) => part.type === 'day').value);
+  return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+}
 
 export default function Transfers(props) {
   const [params] = useSearchParams();
@@ -24,6 +38,7 @@ function TransferForm({ accounts, demoTransfer, refreshAccounts, initialAccountI
   const [external, setExternal] = useState(null);
   const [externalError, setExternalError] = useState('');
   const [externalAttempt, setExternalAttempt] = useState(0);
+  const [showExternalModal, setShowExternalModal] = useState(false);
   const [amount, setAmount] = useState('');
   const [timing, setTiming] = useState('now');
   const [date, setDate] = useState('');
@@ -39,7 +54,7 @@ function TransferForm({ accounts, demoTransfer, refreshAccounts, initialAccountI
   const ownTargets = active.filter((account) => account.id !== source?.id);
   const ownTarget = ownTargets.find((account) => String(account.id) === to) || ownTargets[0];
   const externalTarget = external?.find((account) => String(account.id) === externalId) || external?.[0];
-  const minimumDate = tomorrowUtc();
+  const minimumDate = tomorrowPacific();
   const hasTarget = kind === 'own_account' ? Boolean(ownTarget)
     : kind === 'external_account' ? Boolean(externalTarget) : true;
 
@@ -77,8 +92,8 @@ function TransferForm({ accounts, demoTransfer, refreshAccounts, initialAccountI
       setError(`That's more than the ${money(source.available)} available.`);
       return;
     }
-    if (timing === 'date' && (!date || date < tomorrowUtc())) {
-      setError('Choose a future date (UTC).');
+    if (timing === 'date' && (!date || date < tomorrowPacific())) {
+      setError('Choose a future date.');
       return;
     }
 
@@ -155,7 +170,7 @@ function TransferForm({ accounts, demoTransfer, refreshAccounts, initialAccountI
         {result && (
           <p role="status">
             {result.status === 'pending'
-              ? `Pending transfer saved for ${result.scheduled_for}. Balances are unchanged. The web app does not send pending transfers automatically.`
+              ? `Pending transfer saved for ${result.scheduled_for}. It will be processed the next time you open the signed-in site on or after that date.`
               : demoTransfer ? 'Demo transfer completed.' : 'Transfer completed.'}
           </p>
         )}
@@ -175,7 +190,7 @@ function TransferForm({ accounts, demoTransfer, refreshAccounts, initialAccountI
               <dt>Amount</dt><dd>{money(Number(review.request.amount))}</dd>
               <dt>When</dt><dd>{review.request.scheduled_for || 'Now'}</dd>
             </dl>
-            {review.request.scheduled_for && <p>Balances stay unchanged. The web app does not send pending transfers automatically.</p>}
+            {review.request.scheduled_for && <p>The transfer will be processed when you next open the signed-in site on or after the selected date.</p>}
             {review.request.destination.kind === 'external_account' && <p>Other-bank transfers are simulated.</p>}
             <button type="button" className="button button-primary" disabled={busy} onClick={confirmTransfer}>
               {busy ? 'Submitting…' : review.request.scheduled_for ? 'Save pending transfer' : 'Transfer now'}
@@ -222,22 +237,31 @@ function TransferForm({ accounts, demoTransfer, refreshAccounts, initialAccountI
               </label>
             )}
             {kind === 'external_account' && (
-              externalError ? (
-                <div>
-                  <p role="alert">{externalError}</p>
-                  <button type="button" className="button" onClick={() => {
-                    setExternalError('');
-                    setExternalAttempt(externalAttempt + 1);
-                  }}>Retry</button>
-                </div>
-              ) : externalTarget ? (
-                <label>
-                  Saved external account
-                  <select value={externalTarget.id} onChange={(event) => setExternalId(event.target.value)}>
-                    {external.map((account) => <option key={account.id} value={account.id}>{account.name} {account.number}</option>)}
-                  </select>
-                </label>
-              ) : <p role="status">{external ? 'You have no saved external accounts.' : 'Loading saved external accounts…'}</p>
+              <>
+                {externalError ? (
+                  <div>
+                    <p role="alert">{externalError}</p>
+                    <button type="button" className="button" onClick={() => {
+                      setExternalError('');
+                      setExternalAttempt(attempt => attempt + 1);
+                    }}>Retry</button>
+                  </div>
+                ) : externalTarget ? (
+                  <label>
+                    Saved external account
+                    <select value={externalTarget.id} onChange={(event) => setExternalId(event.target.value)}>
+                      {external.map((account) => <option key={account.id} value={account.id}>{account.name} {account.number}</option>)}
+                    </select>
+                  </label>
+                ) : <p role="status">{external ? 'You have no saved external accounts.' : 'Loading saved external accounts…'}</p>}
+                {external && (
+                  <div>
+                    <button type="button" className="button button-outline" onClick={() => setShowExternalModal(true)}>
+                      Add external account
+                    </button>
+                  </div>
+                )}
+              </>
             )}
             <label>
               Amount (USD)
@@ -255,16 +279,26 @@ function TransferForm({ accounts, demoTransfer, refreshAccounts, initialAccountI
             {timing === 'date' && (
               <>
                 <label>
-                  Date (UTC)
+                  Date
                   <input type="date" min={minimumDate} required value={date} onChange={(event) => setDate(event.target.value)} />
                 </label>
-                <p>Saving a pending transfer leaves balances unchanged. The web app does not send it automatically.</p>
+                <p>Funds are checked when the transfer runs, the next time you open the signed-in site on or after this date.</p>
               </>
             )}
             <button className="button button-primary" disabled={busy || !source || !hasTarget}>Review transfer</button>
           </form>
         )}
       </section>
+      {showExternalModal && (
+        <ExternalAccountModal
+          onClose={() => setShowExternalModal(false)}
+          onSaved={(account) => {
+            setExternal((accounts) => [...accounts, account]);
+            setExternalId(String(account.id));
+            setShowExternalModal(false);
+          }}
+        />
+      )}
     </>
   );
 }

@@ -8,7 +8,10 @@ import re
 from decimal import Decimal
 from typing import Annotated, Literal
 from urllib.request import Request, urlopen
-from datetime import date, datetime, timedelta, timezone
+from urllib.error import HTTPError
+from urllib.parse import quote
+from datetime import date, datetime, time as time_of_day, timedelta, timezone
+from zoneinfo import ZoneInfo
 import bcrypt   # For securely hashing passwords
 import jwt      # For creating and verifying JSON Web Tokens (JWTs)
 from jwt import PyJWKClient  # Gets Auth0's public keys for token validation
@@ -29,6 +32,9 @@ DATABASE_PATH = os.getenv(
 JWT_SECRET = "local-development-secret-key-for-testing-only"
 AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN")
 AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE")
+AUTH0_MANAGEMENT_CLIENT_ID = os.getenv("AUTH0_MANAGEMENT_CLIENT_ID")
+AUTH0_MANAGEMENT_CLIENT_SECRET = os.getenv("AUTH0_MANAGEMENT_CLIENT_SECRET")
+AUTH0_MANAGEMENT_AUDIENCE = os.getenv("AUTH0_MANAGEMENT_AUDIENCE", f"https://{AUTH0_DOMAIN}/api/v2/" if AUTH0_DOMAIN else "")
 AUTH0_ISSUER = f"https://{AUTH0_DOMAIN}/" if AUTH0_DOMAIN else ""
 AUTH0_JWKS_URL = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json" if AUTH0_DOMAIN else ""
 auth0_jwks_client = PyJWKClient(AUTH0_JWKS_URL) if AUTH0_JWKS_URL else None
@@ -67,6 +73,9 @@ class ProfileAvailabilityRequest(BaseModel):
     email: EmailStr
     username: str = Field(min_length=3, max_length=30)
     phone_number: str = Field(min_length=1, max_length=30)
+
+class DeletedUsernameRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=30)
 
 # Database functions
 def get_database():
@@ -170,6 +179,49 @@ def get_auth0_userinfo(token: str):
             detail=f"Unable to retrieve Auth0 user profile: {e}"
         )
 
+# Delete Auth0 user account
+def delete_auth0_user(auth0_sub: str) -> None:
+    if not AUTH0_MANAGEMENT_CLIENT_ID or not AUTH0_MANAGEMENT_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=500,
+            detail="Auth0 account deletion is not configured on the backend",
+        )
+
+    token_request = Request(
+        f"https://{AUTH0_DOMAIN}/oauth/token",
+        data=json.dumps({
+            "grant_type": "client_credentials",
+            "client_id": AUTH0_MANAGEMENT_CLIENT_ID,
+            "client_secret": AUTH0_MANAGEMENT_CLIENT_SECRET,
+            "audience": AUTH0_MANAGEMENT_AUDIENCE,
+        }).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(token_request, timeout=10) as response:
+            management_token = json.loads(response.read().decode("utf-8"))["access_token"]
+    except Exception as exc:
+        logger.exception("Unable to obtain Auth0 Management API token")
+        raise HTTPException(status_code=502, detail="Unable to contact Auth0 for account deletion") from exc
+
+    delete_request = Request(
+        f"https://{AUTH0_DOMAIN}/api/v2/users/{quote(auth0_sub, safe='')}",
+        headers={"Authorization": f"Bearer {management_token}"},
+        method="DELETE",
+    )
+    try:
+        with urlopen(delete_request, timeout=10):
+            return
+    except HTTPError as exc:
+        if exc.code == 404:
+            return
+        logger.exception("Auth0 rejected deletion of user %s", auth0_sub)
+        raise HTTPException(status_code=502, detail="Auth0 could not delete the customer account") from exc
+    except Exception as exc:
+        logger.exception("Unable to delete Auth0 user %s", auth0_sub)
+        raise HTTPException(status_code=502, detail="Unable to contact Auth0 for account deletion") from exc
+
 # Link Auth0 user to banking user
 def link_auth0_user(token_data):
     """Resolve Auth0 subject to a Java banking user and creating one if needed."""
@@ -177,6 +229,13 @@ def link_auth0_user(token_data):
     auth0_sub = token_data["sub"]
     is_new_user = False       # Stays true only when this login creates the user's local banking profile
     banking_user = user_dao.getUserByAuth0Sub(auth0_sub)
+    if banking_user is not None:
+        profile_status = user_dao.getProfileStatusByAuth0Sub(auth0_sub)
+        if str(profile_status or "").lower() == "inactive":
+            raise HTTPException(
+                status_code=403,
+                detail="Account has been deleted. Please contact support.",
+            )
     if banking_user is None and token_data.get("email"):
         banking_user = user_dao.linkAuth0SubByEmail(
             auth0_sub,
@@ -526,6 +585,7 @@ def deactivate_manager_customer(
         )
 
     user_dao = jpype.JClass("database.UserDAO")
+    auth0_sub = user_dao.getAuth0SubByUserId(user_id)
     result = str(user_dao.deactivateCustomerById(user_id))
 
     if result == "not_found":
@@ -533,6 +593,13 @@ def deactivate_manager_customer(
     if result == "not_customer":
         raise HTTPException(status_code=403, detail="Only customer profiles can be deactivated")
     if result == "already_inactive":
+        if auth0_sub:
+            delete_auth0_user(str(auth0_sub))
+            return {
+                "user_id": user_id,
+                "status": "deleted",
+                "message": "Customer account deleted successfully",
+            }
         raise HTTPException(status_code=409, detail="Customer profile is already inactive")
     if result == "active_accounts":
         raise HTTPException(
@@ -542,11 +609,40 @@ def deactivate_manager_customer(
     if result != "deactivated":
         raise HTTPException(status_code=500, detail="Unable to deactivate customer profile")
 
+    if auth0_sub:
+        delete_auth0_user(str(auth0_sub))
+
     return {
         "user_id": user_id,
-        "status": "inactive",
-        "message": "Customer profile deactivated successfully",
+        "status": "deleted",
+        "message": "Customer account deleted successfully",
     }
+# Users delete own profile
+@app.delete("/api/auth/profile")
+def delete_own_profile(user=Depends(get_current_user)):
+    user_id = int(user["banking_user"]["user_id"])
+    user_dao = jpype.JClass("database.UserDAO")
+    auth0_sub = user_dao.getAuth0SubByUserId(user_id)
+
+    result = str(user_dao.deactivateCustomerById(user_id))
+    if result == "active_accounts":
+        raise HTTPException(
+            status_code=409,
+            detail="Please close all bank accounts before deleting your profile.",
+        )
+    if result == "already_inactive":
+        if auth0_sub:
+            delete_auth0_user(str(auth0_sub))
+            return {"status": "deleted", "message": "Customer account deleted successfully"}
+        raise HTTPException(status_code=409, detail="This profile has already been deleted.")
+    if result == "not_customer":
+        raise HTTPException(status_code=403, detail="Only customer profiles can be deleted this way")
+    if result != "deactivated":
+        raise HTTPException(status_code=500, detail="Unable to delete your profile")
+
+    if auth0_sub:
+        delete_auth0_user(str(auth0_sub))
+    return {"status": "deleted", "message": "Customer account deleted successfully"}
 
 # Basic test endpoint
 @app.get("/api/data")
@@ -554,6 +650,13 @@ def read_data():
     return {"message": "Hello from backend"}
 
 # Checks submitted email, username, and phone number before auth0 registration so duplicate errors appear on signup page
+@app.post("/api/auth/check-deleted-username")
+def check_deleted_username(request: DeletedUsernameRequest):
+    user_dao = jpype.JClass("database.UserDAO")
+    return {
+        "deleted": bool(user_dao.isInactiveUsername(request.username.strip()))
+    }
+
 @app.post("/api/auth/check-profile-availability")
 def check_profile_availability(request: ProfileAvailabilityRequest):
     user_dao = jpype.JClass("database.UserDAO") # Connectes to the Java UserDAO class to check for conflicts in the database
@@ -843,6 +946,9 @@ class ExternalAccountDestination(BaseModel):
     external_account_id: int = Field(gt=0, strict=True)
 
 
+TRANSFER_TIME_ZONE = ZoneInfo("America/Los_Angeles")
+
+
 class TransferRequest(MovementRequest):
     source_account_id: int = Field(gt=0, strict=True)
     destination: Annotated[
@@ -859,13 +965,25 @@ class TransferRequest(MovementRequest):
         try:
             if isinstance(value, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
                 parsed = date.fromisoformat(value)
-                if parsed > datetime.now(timezone.utc).date():
+                if parsed > datetime.now(TRANSFER_TIME_ZONE).date():
                     return parsed
         except ValueError:
             pass
         raise HTTPException(status_code=422, detail={
-            "field": "scheduled_for", "message": "Choose a future date (UTC).",
+            "field": "scheduled_for", "message": "Choose a future date.",
         })
+
+
+class ExternalAccountRequest(BaseModel):
+    model_config = {"extra": "forbid", "str_strip_whitespace": True}
+
+    bank_name: str = Field(min_length=1, max_length=120)
+    account_holder_name: str = Field(min_length=1, max_length=120)
+    routing_number: str = Field(pattern=r"^[0-9]{9}$")
+    account_number: str = Field(pattern=r"^[0-9]{4,17}$")
+    confirm_account_number: str = Field(pattern=r"^[0-9]{4,17}$")
+    account_type: Literal["checking", "savings"]
+    nickname: str = Field(default="", max_length=80)
 
 
 def owned_external_accounts(user):
@@ -873,16 +991,64 @@ def owned_external_accounts(user):
     return external_dao.getExternalAccountsByUserId(user["banking_user"]["user_id"])
 
 
+def serialize_external_account(account):
+    number = str(account.getAccountNumber())
+    visible_digits = min(4, len(number) - 2)
+    return {
+        "id": int(account.getExternalAccountId()),
+        "name": str(account.getNickname() or account.getBankName()),
+        "number": f"•••• {number[-visible_digits:]}" if visible_digits > 0 else "••••",
+    }
+
+
 @app.get("/api/external-accounts")
 def get_external_accounts(user=Depends(get_current_user)):
-    return [
-        {
-            "id": int(account.getExternalAccountId()),
-            "name": str(account.getNickname() or account.getBankName()),
-            "number": _mask_account_number(account.getAccountNumber()),
-        }
-        for account in owned_external_accounts(user)
-    ]
+    return [serialize_external_account(account) for account in owned_external_accounts(user)]
+
+
+@app.post("/api/external-accounts", status_code=201)
+def create_external_account(request: ExternalAccountRequest, user=Depends(get_current_user)):
+    routing_number = request.routing_number
+    bank_routing_number = str(jpype.JClass("database.DatabaseManager").BANK_ROUTING_NUMBER)
+    if routing_number == bank_routing_number:
+        raise HTTPException(status_code=422, detail={
+            "field": "routing_number",
+            "message": "Use a Team 2 Bank destination for this routing number.",
+        })
+    weights = (3, 7, 1) * 3
+    if routing_number == "000000000" or sum(int(digit) * weight for digit, weight in zip(routing_number, weights)) % 10:
+        raise HTTPException(status_code=422, detail={
+            "field": "routing_number", "message": "Enter a valid 9-digit routing number.",
+        })
+    if request.confirm_account_number != request.account_number:
+        raise HTTPException(status_code=422, detail={
+            "field": "confirm_account_number", "message": "The account numbers do not match.",
+        })
+
+    def find_saved_account():
+        return next((
+            account for account in owned_external_accounts(user)
+            if str(account.getRoutingNumber()) == routing_number
+            and str(account.getAccountNumber()) == request.account_number
+        ), None)
+
+    duplicate_message = "This external account is already saved."
+    if find_saved_account() is not None:
+        raise HTTPException(status_code=409, detail=duplicate_message)
+
+    external_dao = jpype.JClass("database.ExternalAccountDAO")
+    saved = external_dao.addExternalAccount(
+        user["banking_user"]["user_id"], request.bank_name, request.account_holder_name,
+        request.account_number, routing_number, request.account_type, request.nickname,
+    )
+    account = find_saved_account()
+    if not saved and account is not None:
+        raise HTTPException(status_code=409, detail=duplicate_message)
+    if not saved:
+        raise HTTPException(status_code=503, detail="Unable to save the external account. Please try again.")
+    if account is None:
+        raise HTTPException(status_code=503, detail="The account was saved, but could not be loaded. Refresh your saved accounts.")
+    return serialize_external_account(account)
 
 
 @app.post("/api/transfers")
@@ -929,13 +1095,138 @@ def create_transfer(request: TransferRequest, user=Depends(get_current_user)):
             })
         saved = send(source_number, target, amount)
     else:
-        saved = send(source_number, target, amount, f"{request.scheduled_for} 00:00:00")
+        scheduled_at = datetime.combine(request.scheduled_for, time_of_day.min, tzinfo=TRANSFER_TIME_ZONE)
+        scheduled_utc = scheduled_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        saved = send(source_number, target, amount, scheduled_utc)
 
     if not saved:
         raise HTTPException(status_code=409, detail="Unable to submit the transfer. Refresh your accounts and try again.")
     if request.scheduled_for is not None:
         return {"status": "pending", "scheduled_for": request.scheduled_for.isoformat()}
     return {"status": "completed"}
+
+
+class BillRequest(MovementRequest):
+    source_account_id: int = Field(gt=0, strict=True)
+    name: str = Field(min_length=1, max_length=100)
+    category: Literal["Utilities", "Rent / Mortgage", "Internet / Phone", "Insurance", "Credit Card", "Subscriptions", "Other"]
+    payment_date: date
+    frequency: Literal["once", "weekly", "monthly"]
+    memo: str = Field(default="", max_length=120)
+
+    @field_validator("name", "memo", mode="before")
+    @classmethod
+    def strip_bill_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("payment_date", mode="before")
+    @classmethod
+    def validate_bill_date(cls, value):
+        if isinstance(value, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+            try:
+                parsed = date.fromisoformat(value)
+                if parsed >= datetime.now(TRANSFER_TIME_ZONE).date():
+                    return parsed
+            except ValueError:
+                pass
+        raise HTTPException(status_code=422, detail="Choose today or a future payment date.")
+
+    @field_validator("amount")
+    @classmethod
+    def limit_bill_amount(cls, value):
+        if value > Decimal("100000"):
+            raise HTTPException(status_code=422, detail="Amount must be between $0.01 and $100,000.")
+        return value
+
+
+def bill_failure_reason(value, source_label):
+    reason = _format_datetime(value)
+    if reason == "Insufficient funds on the day the bill was processed.":
+        return f"Not enough money in {source_label}."
+    return reason
+
+
+def serialize_bill(bill):
+    source_label = str(bill.sourceAccountLabel())
+    return {
+        "id": int(bill.id()),
+        "occurrenceId": int(bill.occurrenceId()),
+        "accountId": int(bill.accountId()),
+        "name": str(bill.name()),
+        "amount": float(bill.amount()),
+        "date": str(bill.paymentDate()),
+        "paymentDate": str(bill.paymentDate()),
+        "category": str(bill.category()),
+        "frequency": str(bill.frequency()),
+        "memo": str(bill.memo()),
+        "status": str(bill.status()),
+        "failureReason": bill_failure_reason(bill.failureReason(), source_label),
+        "sourceAccountLabel": source_label,
+    }
+
+
+@app.get("/api/bills")
+def get_bills(user=Depends(get_current_user)):
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    try:
+        return [serialize_bill(bill) for bill in transaction_dao.getBillSchedules(user["banking_user"]["user_id"])]
+    except jpype.JException as error:
+        logger.exception("Unable to load bill schedules")
+        raise HTTPException(status_code=503, detail="Unable to load saved bills. Please retry.") from error
+
+
+@app.post("/api/bills", status_code=201)
+def schedule_bill(request: BillRequest, user=Depends(get_current_user)):
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    try:
+        bill = transaction_dao.scheduleBill(
+            user["banking_user"]["user_id"], request.source_account_id, request.name,
+            float(request.amount), request.payment_date.isoformat(), request.frequency, request.category, request.memo,
+        )
+    except jpype.JException as error:
+        logger.exception("Unable to save bill schedule")
+        raise HTTPException(status_code=503, detail="Unable to save the bill. Please retry.") from error
+    if bill is None:
+        raise HTTPException(status_code=409, detail="Select an active account you own.")
+    return serialize_bill(bill)
+
+
+@app.delete("/api/bills/{bill_id}", status_code=204)
+def cancel_bill(bill_id: int, user=Depends(get_current_user)):
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    try:
+        cancelled = transaction_dao.cancelBill(user["banking_user"]["user_id"], bill_id)
+    except jpype.JException as error:
+        logger.exception("Unable to cancel bill schedule")
+        raise HTTPException(status_code=503, detail="Unable to cancel the bill. Please retry.") from error
+    if not cancelled:
+        raise HTTPException(status_code=404, detail="There is no pending payment for this bill.")
+
+
+@app.post("/api/bills/occurrences/{occurrence_id}/retry")
+def retry_failed_bill(occurrence_id: int, user=Depends(get_current_user)):
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    try:
+        result = transaction_dao.retryFailedBill(user["banking_user"]["user_id"], occurrence_id)
+    except jpype.JException as error:
+        logger.exception("Unable to retry failed bill")
+        raise HTTPException(status_code=503, detail="Unable to retry this payment. Please try again.") from error
+    if result is None:
+        raise HTTPException(status_code=404, detail="This payment is no longer available to retry.")
+    failure = _format_datetime(result.failureReason())
+    return {"status": "completed" if failure is None else "failed", "failureReason": failure}
+
+
+@app.post("/api/transfers/process-due")
+def process_due_transfers(user=Depends(get_current_user)):
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    cutoff = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        result = transaction_dao.processDueTransfers(user["banking_user"]["user_id"], cutoff)
+    except jpype.JException as error:
+        logger.exception("Unable to process due payments")
+        raise HTTPException(status_code=503, detail="Due payments could not be processed. Please retry.") from error
+    return {"completed": int(result.getCompleted()), "failed": int(result.getFailed())}
 
 
 @app.post("/api/accounts/{account_id}/deposit")
@@ -1013,8 +1304,18 @@ def serialize_accounts(java_accounts, include_details=False):
                 (transaction_type.replace("_", " ").title(), "Other", "CircleDollarSign", 1),
             )
             status = str(transaction.getStatus())
+            related = str(transaction.getRelatedAccount()) if transaction_type == "withdrawal" else ""
+            is_bill = related.startswith("BILL-")
+            if is_bill:
+                name, category = f"Bill payment to {related.removeprefix('BILL-')}", "Bill Payment"
             if status != "completed" and transaction_type in ("transfer_in", "transfer_out"):
                 name = "Incoming transfer" if transaction_type == "transfer_in" else "Outgoing transfer"
+            failure_reason = None
+            if status == "failed" and is_bill:
+                account_label = "Savings" if account_type == "savings" else "Checking"
+                failure_reason = bill_failure_reason(transaction.getFailureReason(), f"{account_label} •••• {account_number[-4:]}")
+            elif status == "failed" and transaction_type == "transfer_out":
+                failure_reason = _format_datetime(transaction.getFailureReason())
             timestamp = str(transaction.getTimestamp())
             transaction_date = datetime.fromisoformat(timestamp)
             transactions.append(
@@ -1031,6 +1332,7 @@ def serialize_accounts(java_accounts, include_details=False):
                     "account": account_id,
                     "transaction_type": transaction_type,
                     "status": status,
+                    "failure_reason": failure_reason,
                     "scheduled_for": _format_datetime(transaction.getScheduledFor()),
                     "icon": icon,
                 }

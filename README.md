@@ -1,43 +1,51 @@
 # CS-160-Group-2-Banking-System
 Software Engineering class project
 
-## Running the Frontend and Backend for dev
-Run the following commands in the terminal inside the corresponding folder (backend or frontend). You may need to download uv, npm, and maven first if you don't have them
+## Run the web project with Docker Compose
 
-**backend**
+1. Start Docker with Compose (for example, Docker Desktop or OrbStack). Stop any dev server using port 5173.
+2. Copy the supplied `.env` file to the repository root and the supplied `.env.local` file to `frontend/.env.local`.
+3. From the repository root, run:
 
-from root, needed once:  `mvn compile dependency:copy-dependencies -DoutputDirectory=target/dependency`
+   ```bash
+   docker compose --env-file .env --env-file frontend/.env.local up --build -d
+   ```
 
-from root: `cd backend`
+   Open [http://localhost:5173](http://localhost:5173).
 
-`uv run uvicorn main:app --reload --port 8000`
+**Stop the project**
 
-**frontend**   
+```bash
+docker compose --env-file .env --env-file frontend/.env.local down
+```
 
-from root:  `cd frontend`
+## Run locally without Docker
 
-needed once:  `npm install` 
+Install Java 17, Maven, uv, and Node.js with npm. Place the supplied `.env` in the repository root and `.env.local` in `frontend/`, as in the Docker setup.
 
-`npm run dev`
+From the repository root, compile the Java classes and copy their dependencies:
 
-**Keep both backend and frontend running**
+```bash
+mvn compile dependency:copy-dependencies -DoutputDirectory=target/dependency
+```
+
+Then start the backend:
+
+```bash
+cd backend
+uv run --env-file ../.env uvicorn app_with_checks:app --host 127.0.0.1 --port 8000
+```
+
+If Maven or the backend cannot find Java 17, set `JAVA_HOME` to your JDK installation. In a second terminal, start the frontend from the repository root:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173).
 
 ## Backend tests
 
-From `backend`, run `uv run python -m pytest tests`. This runs the tests named `test_*.py` added under `tests/`.
-
-## Running the Backend for Authentication
-Run the following commands in the terminal from the project root to ensure auth0 in run with the backend.
-
-`.\.venv\Scripts\Activate.ps1`
-
-`$env:PYTHONPATH="$PWD\backend"`
-
-Set JAVA_HOME to the location of your Java 17 installation:
-`$env:JAVA_HOME="C:\Users\ivana\AppData\Local\Programs\Eclipse Adoptium\jdk-17-runtime"`
-
-`$env:AUTH0_DOMAIN="dev-fg7mzenn1walaym8.us.auth0.com"`
-
-`$env:AUTH0_AUDIENCE="https://team2bank-api"`
-
-`python -m uvicorn backend.main:app`
+From `backend/`, run `uv run python -m pytest tests`.

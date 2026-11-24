@@ -18,6 +18,15 @@ public class DatabaseManager {
         return DriverManager.getConnection(DB_URL);
     }
 
+    private static void ensureTransactionColumn(Statement statement, String name, String type) throws SQLException {
+        try (var columns = statement.executeQuery("PRAGMA table_info(transactions)")) {
+            while (columns.next()) {
+                if (name.equals(columns.getString("name"))) return;
+            }
+        }
+        statement.executeUpdate("ALTER TABLE transactions ADD COLUMN " + name + " " + type);
+    }
+
     // Initialize Database and Tables
     public static void initializeDatabase() {
         try (Connection conn = DriverManager.getConnection(DB_URL);
@@ -108,6 +117,13 @@ public class DatabaseManager {
                 "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
                 "FOREIGN KEY (account_number) REFERENCES bank_accounts(account_number) ON DELETE CASCADE);";
             stmt.execute(createTransactionsTable);
+            ensureTransactionColumn(stmt, "counterpart_transaction_id", "INTEGER");
+            ensureTransactionColumn(stmt, "external_account_id", "INTEGER");
+            ensureTransactionColumn(stmt, "failure_reason", "TEXT");
+            ensureTransactionColumn(stmt, "bill_series_id", "INTEGER");
+            ensureTransactionColumn(stmt, "bill_category", "TEXT");
+            ensureTransactionColumn(stmt, "bill_memo", "TEXT");
+            ensureTransactionColumn(stmt, "bill_repeat_day", "INTEGER");
 
             System.out.println("Transactions table created successfully.");
 

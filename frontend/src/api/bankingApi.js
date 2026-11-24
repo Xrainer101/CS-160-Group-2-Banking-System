@@ -34,6 +34,10 @@ export function getCurrentUser() {
     return request('/api/auth/me');
 }
 
+export function deleteOwnProfile() {
+    return request('/api/auth/profile', { method: 'DELETE' });
+}
+
 export function createAccount(accountType) {
     return request('/api/accounts', {
         method: 'POST',
@@ -61,6 +65,35 @@ export function getAccounts() {
 
 export function getExternalAccounts(signal) {
     return request('/api/external-accounts', { signal });
+}
+
+export function createExternalAccount(account) {
+    return request('/api/external-accounts', {
+        method: 'POST',
+        body: JSON.stringify(account),
+    });
+}
+
+export function getBills() {
+    return request('/api/bills');
+}
+
+export function createBill(bill) {
+    return request('/api/bills', { method: 'POST', body: JSON.stringify(bill) });
+}
+
+export function cancelBill(id) {
+    return request(`/api/bills/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function retryBill(occurrenceId) {
+    return request(`/api/bills/occurrences/${encodeURIComponent(occurrenceId)}/retry`, {
+        method: 'POST',
+    });
+}
+
+export function processDueTransfers() {
+    return request('/api/transfers/process-due', { method: 'POST' });
 }
 
 export function createTransfer(transfer) {

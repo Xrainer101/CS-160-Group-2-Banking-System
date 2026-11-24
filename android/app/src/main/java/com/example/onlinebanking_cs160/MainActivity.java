@@ -83,10 +83,19 @@ public class MainActivity extends AppCompatActivity {
             } catch (ApiClient.MfaRequiredException e) { // Multi-factor authentication is required for this account
                 runOnUiThread(() -> handleMfaEnrollment(e.mfaToken, username));
             } catch (ApiClient.ApiException e) {
+                boolean deleted = false;
+                try {
+                    deleted = ApiClient.isDeletedUsername(username);
+                } catch (Exception ignored) {
+                    // Keep the original error if we cant check if the username has been deleted
+                }
+                final boolean deletedAccount = deleted;
                 runOnUiThread(() -> {
                     binding.buttonLogin.setEnabled(true);
 
-                    if (e.getStatusCode() == 423){
+                    if (deletedAccount) {
+                        Toast.makeText(this, "Account has been deleted. Please contact support.", Toast.LENGTH_LONG).show();
+                    } else if (e.getStatusCode() == 423){
                         Toast.makeText(this,"Account temporarily locked.",Toast.LENGTH_LONG).show();
                     } else {
                         Toast.makeText(this,"Incorrect username or password.",Toast.LENGTH_LONG).show();

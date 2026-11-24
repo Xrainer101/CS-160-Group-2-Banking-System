@@ -4,8 +4,14 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 
 public class TransactionDAO {
 /**
@@ -178,7 +184,9 @@ public class TransactionDAO {
                 } else {
                     // SCHEDULED: Do NOT move the money. Just log the intent as pending.
                     TransactionDAO.logTransaction(conn, fromAccountNumber, "transfer_out", amount, toAccountNumber, "pending", scheduledFor);
+                    int outgoingId = lastTransactionId(conn);
                     TransactionDAO.logTransaction(conn, toAccountNumber, "transfer_in", amount, fromAccountNumber, "pending", scheduledFor);
+                    updateTransferReference(conn, "counterpart_transaction_id", outgoingId, lastTransactionId(conn));
                     
                     System.out.println("Transfer of $" + String.format("%.2f", amount) + " scheduled for " + scheduledFor + ".");
                 }
@@ -227,6 +235,7 @@ public class TransactionDAO {
                 } else {
                     TransactionDAO.logTransaction(conn, fromInternalAccount, "transfer_out",
                                                   amount, externalLabel, "pending", scheduledFor);
+                    updateTransferReference(conn, "external_account_id", lastTransactionId(conn), externalAccountId);
                 }
 
                 conn.commit();
@@ -346,6 +355,349 @@ public class TransactionDAO {
     }
     
 
+    private static int lastTransactionId(Connection conn) throws SQLException {
+        try (Statement stmt = conn.createStatement();
+             ResultSet row = stmt.executeQuery("SELECT last_insert_rowid()")) {
+            if (row.next()) return row.getInt(1);
+            throw new SQLException("Missing transaction ID after insert.");
+        }
+    }
+
+    // column is supplied only by the two scheduled-transfer creation paths.
+    private static void updateTransferReference(Connection conn, String column, int id, int reference) throws SQLException {
+        try (PreparedStatement stmt = conn.prepareStatement(
+                "UPDATE transactions SET " + column + " = ? WHERE transaction_id = ?")) {
+            stmt.setInt(1, reference);
+            stmt.setInt(2, id);
+            stmt.executeUpdate();
+        }
+    }
+
+    private static final ZoneId BILL_ZONE = ZoneId.of("America/Los_Angeles");
+    private static final DateTimeFormatter LEDGER_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    public record BillSchedule(int id, int occurrenceId, int accountId, String name, double amount, String paymentDate,
+                               String category, String frequency, String memo, String status,
+                               String failureReason, String sourceAccountLabel) {}
+
+    private record BillOccurrence(int seriesId, String category, String memo, int repeatDay, String unit) {}
+
+    private static String sourceAccountLabel(String type, String accountNumber) {
+        String label = "savings".equals(type) ? "Savings" : "Checking";
+        return label + " •••• " + accountNumber.substring(Math.max(0, accountNumber.length() - 4));
+    }
+
+    private static LocalDate billDate(String utc) {
+        return LocalDateTime.parse(utc, LEDGER_TIME).atOffset(ZoneOffset.UTC)
+            .atZoneSameInstant(BILL_ZONE).toLocalDate();
+    }
+
+    private static String billTimestamp(LocalDate date) {
+        return date.atStartOfDay(BILL_ZONE).withZoneSameInstant(ZoneOffset.UTC).format(LEDGER_TIME);
+    }
+
+    public static BillSchedule scheduleBill(int userId, int accountId, String name, double amount,
+                                           String paymentDate, String frequency, String category, String memo)
+            throws SQLException {
+        String unit = switch (frequency) {
+            case "once" -> "none";
+            case "weekly" -> "weeks";
+            case "monthly" -> "months";
+            default -> throw new IllegalArgumentException("Unsupported bill frequency.");
+        };
+        LocalDate date = LocalDate.parse(paymentDate);
+        try (Connection conn = DatabaseManager.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                String source;
+                String sourceLabel;
+                try (PreparedStatement stmt = conn.prepareStatement(
+                        "SELECT account_number, account_type FROM bank_accounts WHERE user_id = ? AND account_id = ? AND status = 'active'")) {
+                    stmt.setInt(1, userId);
+                    stmt.setInt(2, accountId);
+                    try (ResultSet row = stmt.executeQuery()) {
+                        if (!row.next()) {
+                            conn.rollback();
+                            return null;
+                        }
+                        source = row.getString("account_number");
+                        sourceLabel = sourceAccountLabel(row.getString("account_type"), source);
+                    }
+                }
+                int id = insertBillOccurrence(conn, source, "BILL-" + name, amount, date,
+                    new BillOccurrence(0, category, memo, date.getDayOfMonth(), unit));
+                conn.commit();
+                return new BillSchedule(id, id, accountId, name, amount, paymentDate, category, frequency, memo, "pending", null, sourceLabel);
+            } catch (SQLException | RuntimeException failure) {
+                conn.rollback();
+                throw failure;
+            }
+        }
+    }
+
+    private static int insertBillOccurrence(Connection conn, String source, String payee, double amount,
+                                            LocalDate date, BillOccurrence bill) throws SQLException {
+        logTransaction(conn, source, "withdrawal", amount, payee, "pending",
+            "none".equals(bill.unit()) ? 0 : 1, bill.unit(), billTimestamp(date));
+        int id = lastTransactionId(conn);
+        try (PreparedStatement stmt = conn.prepareStatement("""
+                UPDATE transactions SET bill_series_id = ?, bill_category = ?, bill_memo = ?, bill_repeat_day = ?
+                WHERE transaction_id = ?
+                """)) {
+            stmt.setInt(1, bill.seriesId() == 0 ? id : bill.seriesId());
+            stmt.setString(2, bill.category());
+            stmt.setString(3, bill.memo());
+            stmt.setInt(4, bill.repeatDay());
+            stmt.setInt(5, id);
+            stmt.executeUpdate();
+        }
+        return id;
+    }
+
+    public static List<BillSchedule> getBillSchedules(int userId) throws SQLException {
+        String sql = """
+            SELECT t.bill_series_id, t.transaction_id, a.account_id, t.related_account, t.amount, t.scheduled_for,
+                   t.bill_category, t.recurrence_unit, t.bill_memo, t.status, t.failure_reason,
+                   a.account_type, a.account_number
+            FROM transactions t
+            JOIN bank_accounts a ON a.account_number = t.account_number
+            WHERE a.user_id = ? AND t.bill_series_id IS NOT NULL
+              AND t.transaction_id = (SELECT MAX(n.transaction_id) FROM transactions n
+                                      WHERE n.bill_series_id = t.bill_series_id)
+            ORDER BY t.scheduled_for, t.transaction_id
+            """;
+        List<BillSchedule> bills = new ArrayList<>();
+        try (Connection conn = DatabaseManager.getConnection(); PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, userId);
+            try (ResultSet row = stmt.executeQuery()) {
+                while (row.next()) {
+                    String frequency = switch (row.getString("recurrence_unit")) {
+                        case "weeks" -> "weekly";
+                        case "months" -> "monthly";
+                        default -> "once";
+                    };
+                    bills.add(new BillSchedule(row.getInt("bill_series_id"), row.getInt("transaction_id"), row.getInt("account_id"),
+                        row.getString("related_account").substring("BILL-".length()), row.getDouble("amount"),
+                        billDate(row.getString("scheduled_for")).toString(), row.getString("bill_category"),
+                        frequency, row.getString("bill_memo"), row.getString("status"), row.getString("failure_reason"),
+                        sourceAccountLabel(row.getString("account_type"), row.getString("account_number"))));
+                }
+            }
+        }
+        return bills;
+    }
+
+    public static boolean cancelBill(int userId, int seriesId) throws SQLException {
+        String sql = """
+            UPDATE transactions SET status = 'cancelled'
+            WHERE bill_series_id = ? AND status = 'pending'
+              AND account_number IN (SELECT account_number FROM bank_accounts WHERE user_id = ?)
+            """;
+        try (Connection conn = DatabaseManager.getConnection(); Statement setup = conn.createStatement();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            setup.execute("PRAGMA busy_timeout = 5000");
+            stmt.setInt(1, seriesId);
+            stmt.setInt(2, userId);
+            return stmt.executeUpdate() != 0;
+        }
+    }
+
+    public record TransferRunResult(int completed, int failed) {
+        public int getCompleted() { return completed; }
+        public int getFailed() { return failed; }
+    }
+
+    private record DueTransfer(int id, String source, String destination, double amount,
+                               String scheduledFor, Integer externalAccountId,
+                               String sourceStatus, String sourceType, double balance, BillOccurrence bill) {}
+
+    public static TransferRunResult processDueTransfers(int userId, String cutoffUtc) throws SQLException {
+        int completed = 0;
+        int failed = 0;
+        try (Connection conn = DatabaseManager.getConnection(); Statement transaction = conn.createStatement()) {
+            transaction.execute("PRAGMA busy_timeout = 5000");
+            while (true) {
+                // Acquire SQLite's write lock before selecting the next pending row.
+                transaction.execute("BEGIN IMMEDIATE");
+                try {
+                    DueTransfer due = findNextDueTransfer(conn, userId, cutoffUtc);
+                    String failure = null;
+                    if (due != null) {
+                        failure = due.bill() == null ? settleDueTransfer(conn, userId, due) : settleDueBill(conn, due, "pending");
+                    }
+                    transaction.execute("COMMIT");
+                    if (due == null) return new TransferRunResult(completed, failed);
+                    if (failure == null) completed++;
+                    else failed++;
+                } catch (SQLException | RuntimeException failure) {
+                    try {
+                        transaction.execute("ROLLBACK");
+                    } catch (SQLException rollbackFailure) {
+                        failure.addSuppressed(rollbackFailure);
+                    }
+                    throw failure;
+                }
+            }
+        }
+    }
+
+    private static final String SETTLEMENT_SELECT = """
+            SELECT t.transaction_id, t.account_number, t.related_account, t.amount, t.scheduled_for,
+                   t.external_account_id, a.status AS source_status, a.account_type, a.balance,
+                   t.bill_series_id, t.bill_category, t.bill_memo, t.bill_repeat_day, t.recurrence_unit
+            FROM transactions t
+            JOIN bank_accounts a ON a.account_number = t.account_number
+            """;
+
+    private static DueTransfer findNextDueTransfer(Connection conn, int userId, String cutoffUtc) throws SQLException {
+        String sql = SETTLEMENT_SELECT + """
+            WHERE a.user_id = ? AND t.status = 'pending'
+              AND ((t.transaction_type = 'transfer_out' AND t.recurrence_interval = 0 AND t.recurrence_unit = 'none')
+                OR (t.transaction_type = 'withdrawal' AND t.bill_series_id IS NOT NULL))
+              AND datetime(t.scheduled_for) <= datetime(?)
+            ORDER BY datetime(t.scheduled_for), t.transaction_id
+            LIMIT 1
+            """;
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, userId);
+            stmt.setString(2, cutoffUtc);
+            try (ResultSet row = stmt.executeQuery()) {
+                return row.next() ? readSettlement(row) : null;
+            }
+        }
+    }
+
+    private static DueTransfer readSettlement(ResultSet row) throws SQLException {
+        int externalId = row.getInt("external_account_id");
+        Integer externalReference = row.wasNull() ? null : externalId;
+        int seriesId = row.getInt("bill_series_id");
+        BillOccurrence bill = row.wasNull() ? null : new BillOccurrence(seriesId,
+            row.getString("bill_category"), row.getString("bill_memo"),
+            row.getInt("bill_repeat_day"), row.getString("recurrence_unit"));
+        return new DueTransfer(row.getInt("transaction_id"), row.getString("account_number"),
+            row.getString("related_account"), row.getDouble("amount"), row.getString("scheduled_for"),
+            externalReference, row.getString("source_status"), row.getString("account_type"), row.getDouble("balance"), bill);
+    }
+
+    public record BillRetryResult(String failureReason) {}
+
+    public static BillRetryResult retryFailedBill(int userId, int occurrenceId) throws SQLException {
+        String sql = SETTLEMENT_SELECT + """
+            WHERE a.user_id = ? AND t.transaction_id = ? AND t.status = 'failed'
+              AND t.transaction_type = 'withdrawal' AND t.bill_series_id IS NOT NULL
+            """;
+        try (Connection conn = DatabaseManager.getConnection(); Statement transaction = conn.createStatement()) {
+            transaction.execute("PRAGMA busy_timeout = 5000");
+            transaction.execute("BEGIN IMMEDIATE");
+            try {
+                DueTransfer due;
+                try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                    stmt.setInt(1, userId);
+                    stmt.setInt(2, occurrenceId);
+                    try (ResultSet row = stmt.executeQuery()) {
+                        due = row.next() ? readSettlement(row) : null;
+                    }
+                }
+                BillRetryResult result = due == null ? null : new BillRetryResult(settleDueBill(conn, due, "failed"));
+                transaction.execute("COMMIT");
+                return result;
+            } catch (SQLException | RuntimeException failure) {
+                try {
+                    transaction.execute("ROLLBACK");
+                } catch (SQLException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                }
+                throw failure;
+            }
+        }
+    }
+
+    private static String settleDueBill(Connection conn, DueTransfer due, String previousStatus) throws SQLException {
+        String failure = null;
+        if (!"active".equals(due.sourceStatus())) failure = "The source account is inactive.";
+        else if (!Double.isFinite(due.amount()) || due.amount() <= 0) failure = "The payment amount is invalid.";
+        else if (due.balance() < due.amount()) failure = "Not enough money in " + sourceAccountLabel(due.sourceType(), due.source()) + ".";
+
+        if (failure == null) {
+            processWithdrawal(conn, due.source(), due.amount());
+            BillOccurrence bill = due.bill();
+            if (!"none".equals(bill.unit())) {
+                LocalDate scheduled = billDate(due.scheduledFor());
+                String next = calculateNextScheduledDate(scheduled.atStartOfDay().format(LEDGER_TIME), 1, bill.unit());
+                if (next == null) throw new SQLException("Unsupported bill recurrence.");
+                LocalDate nextDate = LocalDateTime.parse(next, LEDGER_TIME).toLocalDate();
+                if ("months".equals(bill.unit())) {
+                    nextDate = nextDate.withDayOfMonth(Math.min(bill.repeatDay(), nextDate.lengthOfMonth()));
+                }
+                insertBillOccurrence(conn, due.source(), due.destination(), due.amount(), nextDate, bill);
+            }
+        }
+        updateSettlementStatus(conn, due.id(), failure, previousStatus);
+        return failure;
+    }
+
+    private static String settleDueTransfer(Connection conn, int userId, DueTransfer due) throws SQLException {
+        String destination = due.destination();
+        boolean external = destination != null && destination.startsWith("EXT-");
+        int counterpartId = destination != null && !external
+            ? findCounterpartTransferId(conn, due.id(), destination, due.source(), due.amount(), due.scheduledFor())
+            : -1;
+
+        String failure = null;
+        if (!"active".equals(due.sourceStatus())) failure = "The source account is inactive.";
+        else if (!Double.isFinite(due.amount()) || due.amount() <= 0) failure = "The transfer amount is invalid.";
+        else if (due.balance() < due.amount()) failure = "Insufficient funds on the day the transfer was processed.";
+        else if (external && !externalRecipientAvailable(conn, userId, due)) failure = "The saved external account is unavailable.";
+        else if (!external && (counterpartId == -1 || destination.equals(due.source())
+                || !activeDestination(conn, destination))) failure = "The destination account is unavailable.";
+
+        if (failure == null) {
+            processWithdrawal(conn, due.source(), due.amount());
+            if (!external) processDeposit(conn, destination, due.amount());
+        }
+        updateSettlementStatus(conn, due.id(), failure, "pending");
+        if (counterpartId != -1) updateSettlementStatus(conn, counterpartId, failure, "pending");
+        return failure;
+    }
+
+    private static boolean externalRecipientAvailable(Connection conn, int userId, DueTransfer due) throws SQLException {
+        String sql = """
+            SELECT COUNT(*) FROM external_accounts
+            WHERE user_id = ? AND account_number = ?
+            """;
+        if (due.externalAccountId() != null) sql += " AND external_account_id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, userId);
+            stmt.setString(2, due.destination().substring("EXT-".length()));
+            if (due.externalAccountId() != null) stmt.setInt(3, due.externalAccountId());
+            try (ResultSet row = stmt.executeQuery()) {
+                return row.next() && row.getInt(1) == 1;
+            }
+        }
+    }
+
+    private static boolean activeDestination(Connection conn, String destination) throws SQLException {
+        try (PreparedStatement stmt = conn.prepareStatement(
+                "SELECT 1 FROM bank_accounts WHERE account_number = ? AND status = 'active'")) {
+            stmt.setString(1, destination);
+            try (ResultSet row = stmt.executeQuery()) {
+                return row.next();
+            }
+        }
+    }
+
+    private static void updateSettlementStatus(Connection conn, int id, String failure, String previousStatus)
+            throws SQLException {
+        try (PreparedStatement stmt = conn.prepareStatement(
+                "UPDATE transactions SET status = ?, failure_reason = ? WHERE transaction_id = ? AND status = ?")) {
+            stmt.setString(1, failure == null ? "completed" : "failed");
+            stmt.setString(2, failure);
+            stmt.setInt(3, id);
+            stmt.setString(4, previousStatus);
+            if (stmt.executeUpdate() != 1) throw new SQLException("Payment changed during settlement.");
+        }
+    }
+
     // ------- EDITORS --------
     /**
      * Edits the amount and/or scheduled date of a pending payment.
@@ -446,7 +798,7 @@ public class TransactionDAO {
 
                 // If it's an outgoing internal transfer, sync the recipient's matching transfer_in leg
                 if ("transfer_out".equals(type) && relatedAccount != null && !relatedAccount.startsWith("EXT-")) {
-                    int counterpartId = findCounterpartTransferId(conn, relatedAccount, accountNumber, oldAmount, oldScheduledFor);
+                    int counterpartId = findCounterpartTransferId(conn, transactionId, relatedAccount, accountNumber, oldAmount, oldScheduledFor);
                     if (counterpartId != -1) {
                         try (PreparedStatement updateCounterpart = conn.prepareStatement(updateSql)) {
                             updateCounterpart.setDouble(1, newAmount);
@@ -476,25 +828,26 @@ public class TransactionDAO {
     /**
      * Private helper to locate the recipient's matching 'transfer_in' row for a scheduled transfer.
      */
-    private static int findCounterpartTransferId(Connection conn, String recipientAcc, String senderAcc,
-                                                 double amount, String scheduledFor) throws SQLException {
-        String sql = "SELECT transaction_id FROM transactions " +
-                     "WHERE account_number = ? AND related_account = ? " +
-                     "AND transaction_type = 'transfer_in' AND amount = ? " +
-                     "AND scheduled_for = ? AND status = 'pending' LIMIT 1";
-
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, recipientAcc);
-            pstmt.setString(2, senderAcc);
-            pstmt.setDouble(3, amount);
-            pstmt.setString(4, scheduledFor);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getInt("transaction_id");
-                }
+    private static int findCounterpartTransferId(Connection conn, int outgoingId, String recipientAcc,
+                                                 String senderAcc, double amount, String scheduledFor) throws SQLException {
+        String sql = """
+            SELECT transaction_id FROM transactions
+            WHERE transaction_id = (SELECT COALESCE(counterpart_transaction_id, transaction_id + 1)
+                                    FROM transactions WHERE transaction_id = ?)
+              AND account_number = ? AND related_account = ?
+              AND transaction_type = 'transfer_in' AND amount = ?
+              AND scheduled_for = ? AND status = 'pending'
+            """;
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, outgoingId);
+            stmt.setString(2, recipientAcc);
+            stmt.setString(3, senderAcc);
+            stmt.setDouble(4, amount);
+            stmt.setString(5, scheduledFor);
+            try (ResultSet row = stmt.executeQuery()) {
+                return row.next() ? row.getInt("transaction_id") : -1;
             }
         }
-        return -1;
     }
 
     /**
@@ -546,8 +899,8 @@ public class TransactionDAO {
                 }
 
                 // 3. If it's an outgoing transfer, cancel the recipient's matching transfer_in leg
-                if ("transfer_out".equals(type) && relatedAccount != null) {
-                    int counterpartId = findCounterpartTransferId(conn, relatedAccount, accountNumber, amount, scheduledFor);
+                if ("transfer_out".equals(type) && relatedAccount != null && !relatedAccount.startsWith("EXT-")) {
+                    int counterpartId = findCounterpartTransferId(conn, transactionId, relatedAccount, accountNumber, amount, scheduledFor);
                     if (counterpartId != -1) {
                         try (PreparedStatement cancelCounterpart = conn.prepareStatement(cancelSql)) {
                             cancelCounterpart.setInt(1, counterpartId);
@@ -579,7 +932,7 @@ public class TransactionDAO {
 
         // ORDER BY timestamp ASC ensures chronological order (oldest to newest)
         String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, status, recurrence_interval, recurrence_unit, scheduled_for, created_at " +
-                     "FROM transactions WHERE account_number = ? ORDER BY created_at ASC";
+                     ", failure_reason FROM transactions WHERE account_number = ? ORDER BY created_at ASC";
 
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -607,7 +960,7 @@ public class TransactionDAO {
                     String created_at = rs.getString("created_at");
 
                     // Create the model and add it to the list
-                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, status, recurrenceInterval, recurrenceUnit, scheduledFor, created_at);
+                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, status, recurrenceInterval, recurrenceUnit, scheduledFor, created_at, rs.getString("failure_reason"));
                     transactions.add(transaction);
 
                     // Determine if money is coming in or going out for formatting

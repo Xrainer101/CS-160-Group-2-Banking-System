@@ -11,10 +11,19 @@ public class Transaction {
     private String recurrenceUnit;
     private String scheduledFor;
     private String timestamp;
+    private final String failureReason;
 
     // Constructor
     public Transaction(int transactionId, String accountNumber, String transactionType, double amount, String relatedAccount, String status, int recurrenceInterval,
                        String recurrenceUnit, String scheduledFor, String timestamp) {
+        this(transactionId, accountNumber, transactionType, amount, relatedAccount, status,
+             recurrenceInterval, recurrenceUnit, scheduledFor, timestamp, null);
+    }
+
+    public Transaction(int transactionId, String accountNumber, String transactionType, double amount,
+                       String relatedAccount, String status, int recurrenceInterval,
+                       String recurrenceUnit, String scheduledFor, String timestamp, String failureReason) {
+        this.failureReason = failureReason;
         this.transactionId = transactionId;
         this.accountNumber = accountNumber;
         this.transactionType = transactionType;
@@ -38,4 +47,5 @@ public class Transaction {
     public String getRecurrenceUnit() { return recurrenceUnit; }
     public String getScheduledFor() { return scheduledFor; }
     public String getTimestamp() { return timestamp; }
+    public String getFailureReason() { return failureReason; }
 }

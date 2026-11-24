@@ -53,6 +53,18 @@ export default function SignUp({ onAuthenticated }) {
   async function submit(e) {
     e.preventDefault();
     setError('');
+    // Birthday restriction for registration, user must be 18 years or older
+    const birthDate = new Date(`${dateOfBirth}T00:00:00`);
+    const today = new Date();
+    const eighteenthBirthday = new Date(
+      today.getFullYear() - 18,
+      today.getMonth(),
+      today.getDate(),
+    );
+    if (!dateOfBirth || birthDate > eighteenthBirthday) {
+      setError('Must be at least 18 years of age to register');
+      return;
+    }
     if (!passwordRequirementsMet) {
       setError('Meet all password requirements before continuing.');
       return;
