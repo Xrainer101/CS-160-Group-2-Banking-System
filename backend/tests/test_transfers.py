@@ -38,6 +38,7 @@ class TransferTests(unittest.TestCase):
             "database.BankAccountDAO": self.bank,
             "database.TransactionDAO": self.ledger,
             "database.ExternalAccountDAO": self.external,
+            "database.DatabaseManager": Mock(BANK_ROUTING_NUMBER="123456789"),
         }.__getitem__
         tomorrow = datetime.now(main.TRANSFER_TIME_ZONE).date() + timedelta(days=1)
         self.tomorrow = tomorrow.isoformat()
@@ -125,6 +126,68 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(self.post(destination={**self.own_target, "external_account_id": 11}).status_code, 422)
         self.assertEqual(self.post(destination={**self.customer_target, "account_number": "0009"}).status_code, 422)
         self.ledger.transfer.assert_not_called()
+
+    def post_external(self, **changes):
+        return self.client.post("/api/external-accounts", json={
+            "bank_name": " Test Bank ",
+            "account_holder_name": "Test Customer",
+            "routing_number": "021000021",
+            "account_number": "0055",
+            "confirm_account_number": "0055",
+            "account_type": "checking",
+            "nickname": "Savings goal",
+            **changes,
+        })
+
+    def test_saved_recipient_is_masked_and_can_be_used_for_both_transfer_types(self):
+        self.saved.getAccountNumber.return_value = "0055"
+        self.saved.getRoutingNumber.return_value = "021000021"
+        self.saved.getNickname.return_value = "Savings goal"
+        self.external.getExternalAccountsByUserId.side_effect = [[], [self.saved]]
+        self.external.addExternalAccount.return_value = True
+
+        response = self.post_external()
+        self.assertEqual(response.status_code, 201)
+        recipient = response.json()
+        self.assertEqual(recipient, {"id": 11, "name": "Savings goal", "number": "•••• 55"})
+        self.external.addExternalAccount.assert_called_once_with(
+            4, "Test Bank", "Test Customer", "0055", "021000021", "checking", "Savings goal",
+        )
+        self.external.getExternalAccountsByUserId.side_effect = None
+        destination = {"kind": "external_account", "external_account_id": recipient["id"]}
+        self.assertEqual(self.post(destination=destination).json(), {"status": "completed"})
+        self.assertEqual(self.post(destination=destination, scheduled_for=self.tomorrow).status_code, 200)
+
+    def test_external_creation_validates_recipient_fields(self):
+        for changes in (
+            {"routing_number": "021000022"},
+            {"routing_number": "000000000"},
+            {"routing_number": "123456789"},
+            {"bank_name": "   "},
+            {"account_number": "55"},
+            {"confirm_account_number": "0056"},
+            {"account_type": "credit"},
+            {"user_id": 8},
+        ):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.post_external(**changes).status_code, 422)
+        self.external.addExternalAccount.assert_not_called()
+
+    def test_external_creation_reports_duplicates_and_database_failures(self):
+        self.saved.getAccountNumber.return_value = "0055"
+        self.saved.getRoutingNumber.return_value = "021000021"
+        self.assertEqual(self.post_external().status_code, 409)
+        self.external.addExternalAccount.assert_not_called()
+
+        self.external.getExternalAccountsByUserId.side_effect = [[], [self.saved], [], []]
+        self.external.addExternalAccount.return_value = False
+        self.assertEqual(self.post_external().status_code, 409)
+        self.assertEqual(self.post_external().status_code, 503)
+
+    def test_external_creation_requires_authentication(self):
+        main.app.dependency_overrides.clear()
+        self.assertIn(self.post_external().status_code, (401, 403))
+        self.external.addExternalAccount.assert_not_called()
 
     def test_external_listing_is_owned_and_masked(self):
         response = self.client.get("/api/external-accounts")

@@ -974,21 +974,81 @@ class TransferRequest(MovementRequest):
         })
 
 
+class ExternalAccountRequest(BaseModel):
+    model_config = {"extra": "forbid", "str_strip_whitespace": True}
+
+    bank_name: str = Field(min_length=1, max_length=120)
+    account_holder_name: str = Field(min_length=1, max_length=120)
+    routing_number: str = Field(pattern=r"^[0-9]{9}$")
+    account_number: str = Field(pattern=r"^[0-9]{4,17}$")
+    confirm_account_number: str = Field(pattern=r"^[0-9]{4,17}$")
+    account_type: Literal["checking", "savings"]
+    nickname: str = Field(default="", max_length=80)
+
+
 def owned_external_accounts(user):
     external_dao = jpype.JClass("database.ExternalAccountDAO")
     return external_dao.getExternalAccountsByUserId(user["banking_user"]["user_id"])
 
 
+def serialize_external_account(account):
+    number = str(account.getAccountNumber())
+    visible_digits = min(4, len(number) - 2)
+    return {
+        "id": int(account.getExternalAccountId()),
+        "name": str(account.getNickname() or account.getBankName()),
+        "number": f"•••• {number[-visible_digits:]}" if visible_digits > 0 else "••••",
+    }
+
+
 @app.get("/api/external-accounts")
 def get_external_accounts(user=Depends(get_current_user)):
-    return [
-        {
-            "id": int(account.getExternalAccountId()),
-            "name": str(account.getNickname() or account.getBankName()),
-            "number": _mask_account_number(account.getAccountNumber()),
-        }
-        for account in owned_external_accounts(user)
-    ]
+    return [serialize_external_account(account) for account in owned_external_accounts(user)]
+
+
+@app.post("/api/external-accounts", status_code=201)
+def create_external_account(request: ExternalAccountRequest, user=Depends(get_current_user)):
+    routing_number = request.routing_number
+    bank_routing_number = str(jpype.JClass("database.DatabaseManager").BANK_ROUTING_NUMBER)
+    if routing_number == bank_routing_number:
+        raise HTTPException(status_code=422, detail={
+            "field": "routing_number",
+            "message": "Use a Team 2 Bank destination for this routing number.",
+        })
+    weights = (3, 7, 1) * 3
+    if routing_number == "000000000" or sum(int(digit) * weight for digit, weight in zip(routing_number, weights)) % 10:
+        raise HTTPException(status_code=422, detail={
+            "field": "routing_number", "message": "Enter a valid 9-digit routing number.",
+        })
+    if request.confirm_account_number != request.account_number:
+        raise HTTPException(status_code=422, detail={
+            "field": "confirm_account_number", "message": "The account numbers do not match.",
+        })
+
+    def find_saved_account():
+        return next((
+            account for account in owned_external_accounts(user)
+            if str(account.getRoutingNumber()) == routing_number
+            and str(account.getAccountNumber()) == request.account_number
+        ), None)
+
+    duplicate_message = "This external account is already saved."
+    if find_saved_account() is not None:
+        raise HTTPException(status_code=409, detail=duplicate_message)
+
+    external_dao = jpype.JClass("database.ExternalAccountDAO")
+    saved = external_dao.addExternalAccount(
+        user["banking_user"]["user_id"], request.bank_name, request.account_holder_name,
+        request.account_number, routing_number, request.account_type, request.nickname,
+    )
+    account = find_saved_account()
+    if not saved and account is not None:
+        raise HTTPException(status_code=409, detail=duplicate_message)
+    if not saved:
+        raise HTTPException(status_code=503, detail="Unable to save the external account. Please try again.")
+    if account is None:
+        raise HTTPException(status_code=503, detail="The account was saved, but could not be loaded. Refresh your saved accounts.")
+    return serialize_external_account(account)
 
 
 @app.post("/api/transfers")

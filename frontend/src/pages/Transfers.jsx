@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { createTransfer, getExternalAccounts } from '../api/bankingApi';
+import ExternalAccountModal from '../components/ExternalAccountModal';
 import { money } from '../data/mockData';
 
 const label = (account) => `${account.type} ${account.number}`;
@@ -37,6 +38,7 @@ function TransferForm({ accounts, demoTransfer, refreshAccounts, initialAccountI
   const [external, setExternal] = useState(null);
   const [externalError, setExternalError] = useState('');
   const [externalAttempt, setExternalAttempt] = useState(0);
+  const [showExternalModal, setShowExternalModal] = useState(false);
   const [amount, setAmount] = useState('');
   const [timing, setTiming] = useState('now');
   const [date, setDate] = useState('');
@@ -235,22 +237,31 @@ function TransferForm({ accounts, demoTransfer, refreshAccounts, initialAccountI
               </label>
             )}
             {kind === 'external_account' && (
-              externalError ? (
-                <div>
-                  <p role="alert">{externalError}</p>
-                  <button type="button" className="button" onClick={() => {
-                    setExternalError('');
-                    setExternalAttempt(externalAttempt + 1);
-                  }}>Retry</button>
-                </div>
-              ) : externalTarget ? (
-                <label>
-                  Saved external account
-                  <select value={externalTarget.id} onChange={(event) => setExternalId(event.target.value)}>
-                    {external.map((account) => <option key={account.id} value={account.id}>{account.name} {account.number}</option>)}
-                  </select>
-                </label>
-              ) : <p role="status">{external ? 'You have no saved external accounts.' : 'Loading saved external accounts…'}</p>
+              <>
+                {externalError ? (
+                  <div>
+                    <p role="alert">{externalError}</p>
+                    <button type="button" className="button" onClick={() => {
+                      setExternalError('');
+                      setExternalAttempt(attempt => attempt + 1);
+                    }}>Retry</button>
+                  </div>
+                ) : externalTarget ? (
+                  <label>
+                    Saved external account
+                    <select value={externalTarget.id} onChange={(event) => setExternalId(event.target.value)}>
+                      {external.map((account) => <option key={account.id} value={account.id}>{account.name} {account.number}</option>)}
+                    </select>
+                  </label>
+                ) : <p role="status">{external ? 'You have no saved external accounts.' : 'Loading saved external accounts…'}</p>}
+                {external && (
+                  <div>
+                    <button type="button" className="button button-outline" onClick={() => setShowExternalModal(true)}>
+                      Add external account
+                    </button>
+                  </div>
+                )}
+              </>
             )}
             <label>
               Amount (USD)
@@ -278,6 +289,16 @@ function TransferForm({ accounts, demoTransfer, refreshAccounts, initialAccountI
           </form>
         )}
       </section>
+      {showExternalModal && (
+        <ExternalAccountModal
+          onClose={() => setShowExternalModal(false)}
+          onSaved={(account) => {
+            setExternal((accounts) => [...accounts, account]);
+            setExternalId(String(account.id));
+            setShowExternalModal(false);
+          }}
+        />
+      )}
     </>
   );
 }
