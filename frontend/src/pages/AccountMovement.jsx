@@ -66,7 +66,6 @@ function AccountMovementForm({ accounts = [], kind, onMove, initialAccountId, re
               value={amount} onChange={event => { setAmount(event.target.value); setError(''); }} />
           </label>
           {error && <p id="amount-error" className="form-error" role="alert">{error}</p>}
-          <label>Memo (optional)<input type="text" disabled /></label>
           <button type="submit" className="button button-primary" disabled={!account || Boolean(pending)}>{title}</button>
         </form>
       </section>

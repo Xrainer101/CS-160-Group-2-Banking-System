@@ -19,51 +19,33 @@ Software Engineering class project
 docker compose --env-file .env --env-file frontend/.env.local down
 ```
 
-## Running the Frontend and Backend for dev
-Run the following commands in the terminal inside the corresponding folder (backend or frontend). You may need to download uv, npm, and maven first if you don't have them
+## Run locally without Docker
 
-**backend**
+Install Java 17, Maven, uv, and Node.js with npm. Place the supplied `.env` in the repository root and `.env.local` in `frontend/`, as in the Docker setup.
 
-from root, needed once:  `mvn compile dependency:copy-dependencies -DoutputDirectory=target/dependency`
+From the repository root, compile the Java classes and copy their dependencies:
 
-from root: `cd backend`
+```bash
+mvn compile dependency:copy-dependencies -DoutputDirectory=target/dependency
+```
 
-`uv run uvicorn main:app --reload --port 8000`
+Then start the backend:
 
-**frontend**   
+```bash
+cd backend
+uv run --env-file ../.env uvicorn app_with_checks:app --host 127.0.0.1 --port 8000
+```
 
-from root:  `cd frontend`
+If Maven or the backend cannot find Java 17, set `JAVA_HOME` to your JDK installation. In a second terminal, start the frontend from the repository root:
 
-needed once:  `npm install` 
+```bash
+cd frontend
+npm ci
+npm run dev
+```
 
-`npm run dev`
-
-**Keep both backend and frontend running**
+Open [http://localhost:5173](http://localhost:5173).
 
 ## Backend tests
 
-From `backend`, run `uv run python -m pytest tests`. This runs the tests named `test_*.py` added under `tests/`.
-
-## Running the Backend for Authentication
-Run the following commands in the terminal from the project root to ensure auth0 in run with the backend.
-
-`.\.venv\Scripts\Activate.ps1`
-
-`$env:PYTHONPATH="$PWD\backend"`
-
-Set JAVA_HOME to the location of your Java 17 installation:
-`$env:JAVA_HOME="C:\Path\To\Your\Java17"`
-
-`$env:AUTH0_DOMAIN="dev-fg7mzenn1walaym8.us.auth0.com"`
-
-`$env:AUTH0_AUDIENCE="https://team2bank-api"`
-
-Include the management client id from the .env file:
-`$env:AUTH0_MANAGEMENT_CLIENT_ID="<client_id>"`
-
-Include the management client secret from the .env file:
-`$env:AUTH0_MANAGEMENT_CLIENT_SECRET="<client_secret>"`
-
-`$env:AUTH0_MANAGEMENT_AUDIENCE="https://dev-fg7mzenn1walaym8.us.auth0.com/api/v2/"`
-
-`python -m uvicorn backend.main:app`
+From `backend/`, run `uv run python -m pytest tests`.
