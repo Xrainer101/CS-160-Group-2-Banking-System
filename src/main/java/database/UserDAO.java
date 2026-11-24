@@ -215,7 +215,8 @@ public class UserDAO {
         List<User> users = new ArrayList<>();
         String sql = "SELECT user_id, username, first_name, last_name, email, phone_number, " +
             "date_of_birth, password_hash, role, failed_login_attempts, lockout_until, created_at " +
-            "FROM users WHERE profile_status = 'active' ORDER BY user_id";
+            "FROM users WHERE profile_status = 'active' " +
+            "AND role = 'customer' ORDER BY user_id";
 
         try (Connection conn = DatabaseManager.getConnection();
         PreparedStatement statement = conn.prepareStatement(sql);

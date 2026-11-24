@@ -1405,7 +1405,9 @@ function AppContent() {
                       <Route
                         path="/admin"
                         element={
-                          canViewManagerReports ? (
+                          bankingLoading ? (
+                            <p>Loading manager access...</p>
+                          ) : canViewManagerReports ? (
                             <AdminPanel
                               preview={false}
                               user={user}
@@ -1424,7 +1426,9 @@ function AppContent() {
                       <Route
                         path="/manager-dashboard"
                         element={
-                          canViewManagerReports ? (
+                          bankingLoading ? (
+                            <p>Loading manager access...</p>
+                          ) : canViewManagerReports ? (
                             <AdminPanel
                               preview={false}
                               user={user}
