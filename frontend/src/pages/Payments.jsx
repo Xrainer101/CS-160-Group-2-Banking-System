@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 
 import { money } from "../data/mockData";
+import { TransactionRows } from "../components/RecentTransactions";
+import RetryPaymentModal from "../components/RetryPaymentModal";
 
 const PAYMENT_CATEGORIES = [
   "Utilities",
@@ -25,14 +27,17 @@ const PAYMENT_CATEGORIES = [
   "Other",
 ];
 
-const today = () => {
-  const date = new Date();
-  const offset = date.getTimezoneOffset() * 60000;
+const pacificCalendar = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Los_Angeles",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
-  return new Date(date.getTime() - offset)
-    .toISOString()
-    .slice(0, 10);
-};
+function today() {
+  const parts = pacificCalendar.formatToParts(new Date());
+  return ["year", "month", "day"].map(type => parts.find(part => part.type === type).value).join("-");
+}
 
 function formatDate(value) {
   if (!value) return "Not specified";
@@ -65,6 +70,22 @@ function isUpcoming(payment) {
 
 function PaymentCard({ payment, accounts, onCancel }) {
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState("");
+
+  async function confirmCancellation() {
+    if (cancelling) return;
+    setCancelling(true);
+    setCancelError("");
+    try {
+      await onCancel(payment.id);
+      setConfirmCancel(false);
+    } catch (failure) {
+      setCancelError(failure.message || "Unable to cancel this payment.");
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   const account = accounts.find(
     (item) =>
@@ -300,13 +321,14 @@ function PaymentCard({ payment, accounts, onCancel }) {
               }}
             >
               <span style={{ fontSize: 13 }}>
-                Cancel this demo payment?
+                Cancel this scheduled payment?
               </span>
 
               <button
                 type="button"
                 className="button button-danger"
-                onClick={() => onCancel(payment.id)}
+                disabled={cancelling}
+                onClick={confirmCancellation}
               >
                 Confirm cancellation
               </button>
@@ -314,10 +336,12 @@ function PaymentCard({ payment, accounts, onCancel }) {
               <button
                 type="button"
                 className="button button-outline"
+                disabled={cancelling}
                 onClick={() => setConfirmCancel(false)}
               >
                 Keep payment
               </button>
+              {cancelError && <p role="alert" className="form-error">{cancelError}</p>}
             </div>
           )}
         </div>
@@ -331,6 +355,9 @@ export default function Payments({
   accounts = [],
   schedulePayment,
   cancelPayment,
+  demoMode,
+  retryFailedPayment,
+  refreshPaymentData,
 }) {
   const [showForm, setShowForm] = useState(false);
 
@@ -346,6 +373,11 @@ export default function Payments({
   const [filter, setFilter] = useState("all");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [paymentToRetry, setPaymentToRetry] = useState(null);
+  const [retryMessage, setRetryMessage] = useState(null);
+  const [needsPaymentRefresh, setNeedsPaymentRefresh] = useState(false);
+  const [refreshingPayments, setRefreshingPayments] = useState(false);
 
   const activeAccounts = accounts.filter(
     (account) =>
@@ -363,6 +395,39 @@ export default function Payments({
     () => payments.filter(isUpcoming),
     [payments]
   );
+
+  const failedPayments = payments.filter(payment => payment.status === "failed").map(payment => ({
+    id: payment.occurrenceId,
+    name: `Bill payment to ${payment.name}`,
+    amount: -Number(payment.amount),
+    date: formatDate(payment.paymentDate),
+    category: payment.category || "Bill Payment",
+    status: "failed",
+    failure_reason: payment.failureReason,
+    payee: payment.name,
+    sourceAccountLabel: payment.sourceAccountLabel,
+  }));
+
+  async function handleRetry(payment) {
+    setRetryMessage(null);
+    try {
+      const result = await retryFailedPayment(payment.id);
+      if (!result.refreshed) setNeedsPaymentRefresh(true);
+      if (result.status !== "completed") return result.failureReason || "Payment failed.";
+      setRetryMessage(`Payment for ${payment.payee} completed.`);
+      return null;
+    } catch (failure) {
+      if (failure.status === 404) setNeedsPaymentRefresh(true);
+      return failure.message || "Unable to retry this payment.";
+    }
+  }
+
+  async function refreshAfterRetry() {
+    setRefreshingPayments(true);
+    const refreshed = await refreshPaymentData();
+    setNeedsPaymentRefresh(!refreshed);
+    setRefreshingPayments(false);
+  }
 
   const scheduledTotal = upcoming.reduce(
     (sum, payment) =>
@@ -430,8 +495,9 @@ export default function Payments({
     resetForm();
   }
 
-  function submitPayment(event) {
+  async function submitPayment(event) {
     event.preventDefault();
+    if (submitting) return;
 
     setError("");
     setSuccess("");
@@ -494,19 +560,20 @@ export default function Payments({
       paymentDate,
       frequency,
       memo: memo.trim(),
-      status: "scheduled",
+      dueToday: paymentDate === today(),
     };
 
-    schedulePayment(
-      name,
-      numericAmount,
-      details
-    );
+    setSubmitting(true);
+    try {
+      await schedulePayment(name, value, details);
+    } catch (failure) {
+      setError(failure.detail?.message || failure.message || "Unable to schedule this bill.");
+      return;
+    } finally {
+      setSubmitting(false);
+    }
 
-    setSuccess(
-      `${name} was added to your demo ` +
-        "scheduled payments."
-    );
+    setSuccess(`Payment for ${name} saved.`);
 
     setShowForm(false);
     resetForm();
@@ -550,7 +617,7 @@ export default function Payments({
           <h2>{upcoming.length}</h2>
 
           <small>
-            Upcoming demo payments
+            Upcoming payments
           </small>
         </section>
 
@@ -825,10 +892,8 @@ export default function Payments({
                     }}
                   />
 
-                  This demo will label the
-                  payment as recurring.
-                  Automatic execution is not
-                  connected to the banking backend.
+                  {demoMode ? "Demo schedules are saved for this session."
+                    : "When you open the signed-in site, due bills are paid and the next payment is scheduled."}
                 </div>
               )}
 
@@ -912,15 +977,16 @@ export default function Payments({
                 <button
                   type="submit"
                   className="button button-primary"
-                  disabled={!activeAccounts.length}
+                  disabled={!activeAccounts.length || submitting}
                 >
                   <CalendarDays size={17} />
-                  Schedule (demo)
+                  {submitting ? "Saving…" : "Schedule payment"}
                 </button>
 
                 <button
                   type="button"
                   className="button button-outline"
+                  disabled={submitting}
                   onClick={closeForm}
                 >
                   Cancel
@@ -960,7 +1026,7 @@ export default function Payments({
               }}
             >
               Review and manage your
-              upcoming demo payments.
+              upcoming payments.
             </p>
           </div>
 
@@ -1089,6 +1155,33 @@ export default function Payments({
         )}
       </section>
 
+      {(failedPayments.length > 0 || retryMessage || needsPaymentRefresh) && (
+        <section className="panel">
+          <h2>Failed payments</h2>
+          {retryMessage && <p role="status">{retryMessage}</p>}
+          {needsPaymentRefresh && (
+            <div>
+              <p>Payment data could not refresh.</p>
+              <button type="button" className="button button-outline" disabled={refreshingPayments}
+                onClick={refreshAfterRetry}>Refresh payment data</button>
+            </div>
+          )}
+          {failedPayments.length > 0 && (
+            <TransactionRows transactions={failedPayments} renderAction={payment => (
+              <button type="button" className="button button-primary" onClick={() => setPaymentToRetry(payment)}>
+                Try Payment Again
+              </button>
+            )} />
+          )}
+        </section>
+      )}
+
+      {paymentToRetry && (
+        <RetryPaymentModal payment={paymentToRetry}
+          onConfirm={() => handleRetry(paymentToRetry)}
+          onDismiss={() => setPaymentToRetry(null)} />
+      )}
+
       {/* Helpful information */}
 
       <section className="panel">
@@ -1119,10 +1212,8 @@ export default function Payments({
             </p>
 
             <small>
-              This is a CS160 academic prototype.
-              Payments are simulated and do not
-              withdraw funds, contact payees, or
-              process automatically.
+              {demoMode ? "Demo payments use sample data."
+                : "Payments debit your balance in this banking simulation. Payees do not receive funds."}
             </small>
           </div>
         </div>

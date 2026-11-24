@@ -281,6 +281,15 @@
   font-size: 0.85rem;
   white-space: nowrap;
 }
+.transaction-row-action .transaction-details strong,
+.transaction-row-action .transaction-details small {
+  color: #b42335;
+}
+
+.transaction-row-action .button {
+  flex-shrink: 0;
+}
+
 .payments-list {
   margin-bottom: 20px;
 }
@@ -458,5 +467,14 @@
   }
   .transaction-row > strong {
     font-size: 0.75rem;
+  }
+  .transaction-row-action {
+    flex-wrap: wrap;
+  }
+  .transaction-row-action .transaction-details {
+    flex-basis: 45%;
+  }
+  .transaction-row-action .button {
+    margin-left: auto;
   }
 }

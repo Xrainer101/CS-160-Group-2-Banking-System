@@ -121,6 +121,10 @@ public class DatabaseManager {
             ensureTransactionColumn(stmt, "counterpart_transaction_id", "INTEGER");
             ensureTransactionColumn(stmt, "external_account_id", "INTEGER");
             ensureTransactionColumn(stmt, "failure_reason", "TEXT");
+            ensureTransactionColumn(stmt, "bill_series_id", "INTEGER");
+            ensureTransactionColumn(stmt, "bill_category", "TEXT");
+            ensureTransactionColumn(stmt, "bill_memo", "TEXT");
+            ensureTransactionColumn(stmt, "bill_repeat_day", "INTEGER");
 
             System.out.println("Transactions table created successfully.");
 

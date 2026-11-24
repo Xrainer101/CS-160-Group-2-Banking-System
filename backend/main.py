@@ -1106,6 +1106,117 @@ def create_transfer(request: TransferRequest, user=Depends(get_current_user)):
     return {"status": "completed"}
 
 
+class BillRequest(MovementRequest):
+    source_account_id: int = Field(gt=0, strict=True)
+    name: str = Field(min_length=1, max_length=100)
+    category: Literal["Utilities", "Rent / Mortgage", "Internet / Phone", "Insurance", "Credit Card", "Subscriptions", "Other"]
+    payment_date: date
+    frequency: Literal["once", "weekly", "monthly"]
+    memo: str = Field(default="", max_length=120)
+
+    @field_validator("name", "memo", mode="before")
+    @classmethod
+    def strip_bill_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("payment_date", mode="before")
+    @classmethod
+    def validate_bill_date(cls, value):
+        if isinstance(value, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+            try:
+                parsed = date.fromisoformat(value)
+                if parsed >= datetime.now(TRANSFER_TIME_ZONE).date():
+                    return parsed
+            except ValueError:
+                pass
+        raise HTTPException(status_code=422, detail="Choose today or a future payment date.")
+
+    @field_validator("amount")
+    @classmethod
+    def limit_bill_amount(cls, value):
+        if value > Decimal("100000"):
+            raise HTTPException(status_code=422, detail="Amount must be between $0.01 and $100,000.")
+        return value
+
+
+def bill_failure_reason(value, source_label):
+    reason = _format_datetime(value)
+    if reason == "Insufficient funds on the day the bill was processed.":
+        return f"Not enough money in {source_label}."
+    return reason
+
+
+def serialize_bill(bill):
+    source_label = str(bill.sourceAccountLabel())
+    return {
+        "id": int(bill.id()),
+        "occurrenceId": int(bill.occurrenceId()),
+        "accountId": int(bill.accountId()),
+        "name": str(bill.name()),
+        "amount": float(bill.amount()),
+        "date": str(bill.paymentDate()),
+        "paymentDate": str(bill.paymentDate()),
+        "category": str(bill.category()),
+        "frequency": str(bill.frequency()),
+        "memo": str(bill.memo()),
+        "status": str(bill.status()),
+        "failureReason": bill_failure_reason(bill.failureReason(), source_label),
+        "sourceAccountLabel": source_label,
+    }
+
+
+@app.get("/api/bills")
+def get_bills(user=Depends(get_current_user)):
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    try:
+        return [serialize_bill(bill) for bill in transaction_dao.getBillSchedules(user["banking_user"]["user_id"])]
+    except jpype.JException as error:
+        logger.exception("Unable to load bill schedules")
+        raise HTTPException(status_code=503, detail="Unable to load saved bills. Please retry.") from error
+
+
+@app.post("/api/bills", status_code=201)
+def schedule_bill(request: BillRequest, user=Depends(get_current_user)):
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    try:
+        bill = transaction_dao.scheduleBill(
+            user["banking_user"]["user_id"], request.source_account_id, request.name,
+            float(request.amount), request.payment_date.isoformat(), request.frequency, request.category, request.memo,
+        )
+    except jpype.JException as error:
+        logger.exception("Unable to save bill schedule")
+        raise HTTPException(status_code=503, detail="Unable to save the bill. Please retry.") from error
+    if bill is None:
+        raise HTTPException(status_code=409, detail="Select an active account you own.")
+    return serialize_bill(bill)
+
+
+@app.delete("/api/bills/{bill_id}", status_code=204)
+def cancel_bill(bill_id: int, user=Depends(get_current_user)):
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    try:
+        cancelled = transaction_dao.cancelBill(user["banking_user"]["user_id"], bill_id)
+    except jpype.JException as error:
+        logger.exception("Unable to cancel bill schedule")
+        raise HTTPException(status_code=503, detail="Unable to cancel the bill. Please retry.") from error
+    if not cancelled:
+        raise HTTPException(status_code=404, detail="There is no pending payment for this bill.")
+
+
+@app.post("/api/bills/occurrences/{occurrence_id}/retry")
+def retry_failed_bill(occurrence_id: int, user=Depends(get_current_user)):
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    try:
+        result = transaction_dao.retryFailedBill(user["banking_user"]["user_id"], occurrence_id)
+    except jpype.JException as error:
+        logger.exception("Unable to retry failed bill")
+        raise HTTPException(status_code=503, detail="Unable to retry this payment. Please try again.") from error
+    if result is None:
+        raise HTTPException(status_code=404, detail="This payment is no longer available to retry.")
+    failure = _format_datetime(result.failureReason())
+    return {"status": "completed" if failure is None else "failed", "failureReason": failure}
+
+
 @app.post("/api/transfers/process-due")
 def process_due_transfers(user=Depends(get_current_user)):
     transaction_dao = jpype.JClass("database.TransactionDAO")
@@ -1113,8 +1224,8 @@ def process_due_transfers(user=Depends(get_current_user)):
     try:
         result = transaction_dao.processDueTransfers(user["banking_user"]["user_id"], cutoff)
     except jpype.JException as error:
-        logger.exception("Unable to process due transfers")
-        raise HTTPException(status_code=503, detail="Due transfers could not be processed. Please retry.") from error
+        logger.exception("Unable to process due payments")
+        raise HTTPException(status_code=503, detail="Due payments could not be processed. Please retry.") from error
     return {"completed": int(result.getCompleted()), "failed": int(result.getFailed())}
 
 
@@ -1193,8 +1304,18 @@ def serialize_accounts(java_accounts, include_details=False):
                 (transaction_type.replace("_", " ").title(), "Other", "CircleDollarSign", 1),
             )
             status = str(transaction.getStatus())
+            related = str(transaction.getRelatedAccount()) if transaction_type == "withdrawal" else ""
+            is_bill = related.startswith("BILL-")
+            if is_bill:
+                name, category = f"Bill payment to {related.removeprefix('BILL-')}", "Bill Payment"
             if status != "completed" and transaction_type in ("transfer_in", "transfer_out"):
                 name = "Incoming transfer" if transaction_type == "transfer_in" else "Outgoing transfer"
+            failure_reason = None
+            if status == "failed" and is_bill:
+                account_label = "Savings" if account_type == "savings" else "Checking"
+                failure_reason = bill_failure_reason(transaction.getFailureReason(), f"{account_label} •••• {account_number[-4:]}")
+            elif status == "failed" and transaction_type == "transfer_out":
+                failure_reason = _format_datetime(transaction.getFailureReason())
             timestamp = str(transaction.getTimestamp())
             transaction_date = datetime.fromisoformat(timestamp)
             transactions.append(
@@ -1211,10 +1332,7 @@ def serialize_accounts(java_accounts, include_details=False):
                     "account": account_id,
                     "transaction_type": transaction_type,
                     "status": status,
-                    "failure_reason": (
-                        _format_datetime(transaction.getFailureReason())
-                        if status == "failed" and transaction_type == "transfer_out" else None
-                    ),
+                    "failure_reason": failure_reason,
                     "scheduled_for": _format_datetime(transaction.getScheduledFor()),
                     "icon": icon,
                 }

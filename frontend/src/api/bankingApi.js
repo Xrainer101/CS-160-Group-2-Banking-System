@@ -74,6 +74,24 @@ export function createExternalAccount(account) {
     });
 }
 
+export function getBills() {
+    return request('/api/bills');
+}
+
+export function createBill(bill) {
+    return request('/api/bills', { method: 'POST', body: JSON.stringify(bill) });
+}
+
+export function cancelBill(id) {
+    return request(`/api/bills/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function retryBill(occurrenceId) {
+    return request(`/api/bills/occurrences/${encodeURIComponent(occurrenceId)}/retry`, {
+        method: 'POST',
+    });
+}
+
 export function processDueTransfers() {
     return request('/api/transfers/process-due', { method: 'POST' });
 }

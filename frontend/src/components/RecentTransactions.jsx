@@ -19,7 +19,7 @@ const icons = {
   TrendingUp,
   Play,
 };
-export function TransactionRows({ transactions }) {
+export function TransactionRows({ transactions, renderAction }) {
   return (
     <div className="transaction-list">
       {!transactions?.length ? (
@@ -28,7 +28,7 @@ export function TransactionRows({ transactions }) {
         transactions.map((t) => {
           const Icon = icons[t.icon] || CircleDollarSign;
           return (
-            <div className="transaction-row" key={t.id}>
+            <div className={renderAction ? "transaction-row transaction-row-action" : "transaction-row"} key={t.id}>
               <span className="transaction-icon">
                 <Icon size={19} />
               </span>
@@ -45,6 +45,7 @@ export function TransactionRows({ transactions }) {
                 {t.amount > 0 ? '+' : ''}
                 {money(t.amount)}
               </strong>
+              {renderAction?.(t)}
             </div>
           );
         })

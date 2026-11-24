@@ -45,6 +45,10 @@ import {
   closeAccount,
   moveAccountMoney,
   processDueTransfers,
+  getBills,
+  createBill,
+  cancelBill,
+  retryBill,
 } from "./api/bankingApi";
 
 import { getManagerPermission } from "./api/adminApi";
@@ -213,7 +217,7 @@ function AppContent() {
     );
 
   const [payments, setPayments] =
-    useState(() => [...initialPayments]);
+    useState(() => isDemoSession() ? [...initialPayments] : []);
 
   const [frozen, setFrozen] = useState(false);
 
@@ -324,15 +328,26 @@ function AppContent() {
     }
   }
 
+  async function refreshBills(version = sessionVersionRef.current) {
+    try {
+      const bills = await getBills();
+      if (version !== sessionVersionRef.current) return false;
+      setPayments(bills);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function retryDueTransfers() {
     if (dueTransferStatus === "working") return;
     const version = sessionVersionRef.current;
     setDueTransferStatus("working");
     const processed = await tryProcessDueTransfers();
-    const refreshed = await refreshAccounts(version);
+    const [refreshed, billsRefreshed] = await Promise.all([refreshAccounts(version), refreshBills(version)]);
     if (version !== sessionVersionRef.current) return;
     if (refreshed) setAccountDetailRevision(value => value + 1);
-    setDueTransferStatus(processed && refreshed ? "" : "retry");
+    setDueTransferStatus(processed && refreshed && billsRefreshed ? "" : "retry");
   }
 
   async function refreshAccounts(
@@ -739,12 +754,13 @@ function AppContent() {
       try {
         const profile = await getCurrentUser();
         const dueProcessed = await tryProcessDueTransfers();
-        const accountData = await getAccounts();
+        const [accountData, billData] = await Promise.all([getAccounts(), getBills().catch(() => null)]);
         const permission = await getManagerPermission();
 
         if (cancelled) return;
 
-        setDueTransferStatus(dueProcessed ? "" : "retry");
+        setPayments(billData || []);
+        setDueTransferStatus(dueProcessed && billData ? "" : "retry");
 
         setUser(userFromProfile(profile));
 
@@ -805,10 +821,11 @@ function AppContent() {
     try {
       const profile = await getCurrentUser();
       const dueProcessed = await tryProcessDueTransfers();
-      const accountData = await getAccounts();
+      const [accountData, billData] = await Promise.all([getAccounts(), getBills().catch(() => null)]);
       const permission = await getManagerPermission();
 
-      setDueTransferStatus(dueProcessed ? "" : "retry");
+      setPayments(billData || []);
+      setDueTransferStatus(dueProcessed && billData ? "" : "retry");
       setUser(userFromProfile(profile));
 
       setAccounts(accountData.accounts || []);
@@ -865,7 +882,7 @@ function AppContent() {
 
     setAccounts([]);
     setTransactions([]);
-    setPayments([...initialPayments]);
+    setPayments([]);
 
     setBankingError("");
     setBankingLoading(false);
@@ -982,14 +999,32 @@ function AppContent() {
   // - Memo
   // - Cancellation
   //
-  // This is frontend-only demo functionality.
-  // It does not debit an account or call a bill-pay API.
+  async function schedulePayment(name, amount, details = {}) {
+    if (!demoMode) {
+      const version = sessionVersionRef.current;
+      const bill = await createBill({
+        name,
+        amount,
+        source_account_id: Number(details.accountId),
+        payment_date: details.paymentDate,
+        frequency: details.frequency,
+        category: details.category,
+        memo: details.memo,
+      });
+      if (version !== sessionVersionRef.current) return bill;
 
-  function schedulePayment(
-    name,
-    amount,
-    details = {}
-  ) {
+      setPayments(previous => [...previous.filter(item => item.id !== bill.id), bill]);
+      const processed = !details.dueToday || await tryProcessDueTransfers();
+      const [accountsRefreshed, billsRefreshed] = await Promise.all([
+        details.dueToday ? refreshAccounts(version) : true,
+        refreshBills(version),
+      ]);
+      if (version === sessionVersionRef.current && (!processed || !accountsRefreshed || !billsRefreshed)) {
+        setDueTransferStatus("retry");
+      }
+      return bill;
+    }
+
     const newPayment = {
       id:
         typeof crypto !== "undefined" &&
@@ -1033,7 +1068,40 @@ function AppContent() {
     return newPayment;
   }
 
-  function cancelPayment(paymentId) {
+  async function refreshPaymentData(version = sessionVersionRef.current) {
+    const [accountsRefreshed, billsRefreshed] = await Promise.all([
+      refreshAccounts(version), refreshBills(version),
+    ]);
+    if (version !== sessionVersionRef.current) return false;
+    if (accountsRefreshed) setAccountDetailRevision(value => value + 1);
+    return accountsRefreshed && billsRefreshed;
+  }
+
+  async function retryFailedPayment(occurrenceId) {
+    const version = sessionVersionRef.current;
+    const result = await retryBill(occurrenceId);
+    if (version !== sessionVersionRef.current) return { ...result, refreshed: true };
+    setPayments(previous => previous.map(bill => bill.occurrenceId === occurrenceId
+      ? { ...bill, status: result.status, failureReason: result.failureReason }
+      : bill));
+    return { ...result, refreshed: await refreshPaymentData(version) };
+  }
+
+  async function cancelPayment(paymentId) {
+    if (!demoMode) {
+      const version = sessionVersionRef.current;
+      await cancelBill(paymentId);
+      if (version !== sessionVersionRef.current) return;
+      setPayments(previous => previous.map(bill =>
+        bill.id === paymentId ? { ...bill, status: "cancelled" } : bill
+      ));
+      const [accountsRefreshed, billsRefreshed] = await Promise.all([refreshAccounts(version), refreshBills(version)]);
+      if (version === sessionVersionRef.current && (!accountsRefreshed || !billsRefreshed)) {
+        setDueTransferStatus("retry");
+      }
+      return;
+    }
+
     setPayments((previous) =>
       previous.filter(
         (payment) =>
@@ -1112,7 +1180,7 @@ function AppContent() {
 
       {!demoMode && user && dueTransferStatus && (
         <div className="toast" role="status">
-          {dueTransferStatus === "working" ? "Checking due transfers…" : "Could not refresh due transfer status."}
+          {dueTransferStatus === "working" ? "Checking due payments…" : "Could not refresh bill and transfer status."}
           <button type="button" disabled={dueTransferStatus === "working"} onClick={retryDueTransfers}>
             Retry
           </button>
@@ -1332,6 +1400,10 @@ function AppContent() {
                         path="/payments"
                         element={
                           <Payments
+                            key={demoMode ? "demo" : session?.access_token}
+                            demoMode={demoMode}
+                            retryFailedPayment={retryFailedPayment}
+                            refreshPaymentData={refreshPaymentData}
                             {...shared}
                           />
                         }
