@@ -2,9 +2,7 @@
 
 ## Run the app
 
-1. Follow the [backend authentication setup](../README.md#running-the-backend-for-authentication) and start the backend on port `8000`.
-2. Open the `android/` folder as a project in Android Studio.
-3. Start an Android emulator, select the `app` run configuration, and click **Run** to launch the app.
+Follow the [Android Studio setup in the root README](../README.md#run-the-android-app-in-android-studio).
 
 ## Run tests
 

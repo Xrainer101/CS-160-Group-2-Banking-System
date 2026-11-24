@@ -46,6 +46,12 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173).
 
+## Run the Android app in Android Studio
+
+1. Start the backend using Docker Compose or the non-Docker backend steps above. Leave the backend running. The Android emulator reaches it at `10.0.2.2:8000`. The web frontend is optional.
+2. Open the `android/` folder as a project in an Android Studio version that supports Android Gradle Plugin 9.0. Let Gradle Sync finish. The included wrapper downloads Gradle and the app dependencies. Install **Android 16 (API 36)** through **SDK Manager** if prompted.
+3. In **Device Manager**, create or select an Android emulator and download an API 36 system image if needed. Select the **app** run configuration and the emulator, then click **Run**.
+
 ## Backend tests
 
 From `backend/`, run `uv run python -m pytest tests`.
