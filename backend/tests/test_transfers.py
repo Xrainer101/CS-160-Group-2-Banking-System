@@ -39,7 +39,11 @@ class TransferTests(unittest.TestCase):
             "database.TransactionDAO": self.ledger,
             "database.ExternalAccountDAO": self.external,
         }.__getitem__
-        self.tomorrow = (datetime.now(timezone.utc).date() + timedelta(days=1)).isoformat()
+        tomorrow = datetime.now(main.TRANSFER_TIME_ZONE).date() + timedelta(days=1)
+        self.tomorrow = tomorrow.isoformat()
+        self.scheduled_utc = datetime.fromisoformat(self.tomorrow).replace(
+            tzinfo=main.TRANSFER_TIME_ZONE
+        ).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         self.own_target = {"kind": "own_account", "account_id": 8}
         self.customer_target = {"kind": "bank_customer", "account_number": "0000000009"}
         self.external_target = {"kind": "external_account", "external_account_id": 11}
@@ -48,6 +52,22 @@ class TransferTests(unittest.TestCase):
         return self.client.post("/api/transfers", json={
             "source_account_id": 7, "destination": self.own_target, "amount": "25.50", **changes
         })
+
+    def test_due_processing_uses_session_owner_and_utc_cutoff(self):
+        self.ledger.processDueTransfers.return_value.getCompleted.return_value = 2
+        self.ledger.processDueTransfers.return_value.getFailed.return_value = 1
+        response = self.client.post("/api/transfers/process-due")
+        self.assertEqual(response.json(), {"completed": 2, "failed": 1})
+        user_id, cutoff = self.ledger.processDueTransfers.call_args.args
+        self.assertEqual(user_id, 4)
+        cutoff_time = datetime.fromisoformat(cutoff).replace(tzinfo=timezone.utc)
+        self.assertLess(abs((datetime.now(timezone.utc) - cutoff_time).total_seconds()), 5)
+
+    def test_due_processing_requires_authentication(self):
+        main.app.dependency_overrides.clear()
+        response = self.client.post("/api/transfers/process-due")
+        self.assertIn(response.status_code, (401, 403))
+        self.ledger.processDueTransfers.assert_not_called()
 
     def test_immediate_transfers_dispatch_by_destination(self):
         cases = [
@@ -76,7 +96,7 @@ class TransferTests(unittest.TestCase):
                 result = self.post(destination=destination, scheduled_for=self.tomorrow, amount="50")
                 self.assertEqual(result.status_code, 200)
                 self.assertEqual(result.json(), {"status": "pending", "scheduled_for": self.tomorrow})
-                method.assert_called_once_with("0012345678", target, 50.0, self.tomorrow + " 00:00:00")
+                method.assert_called_once_with("0012345678", target, 50.0, self.scheduled_utc)
         self.source.getBalance.assert_not_called()
 
     def test_unusable_accounts_never_write(self):
@@ -94,7 +114,7 @@ class TransferTests(unittest.TestCase):
         self.ledger.transferToExternal.assert_not_called()
 
     def test_validation_and_insufficient_funds(self):
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(main.TRANSFER_TIME_ZONE).date()
         for value in (today.isoformat(), (today - timedelta(days=1)).isoformat(), "2027-02-30", 0):
             with self.subTest(scheduled_for=value):
                 self.assertEqual(self.post(scheduled_for=value).status_code, 422)

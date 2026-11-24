@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -178,7 +179,9 @@ public class TransactionDAO {
                 } else {
                     // SCHEDULED: Do NOT move the money. Just log the intent as pending.
                     TransactionDAO.logTransaction(conn, fromAccountNumber, "transfer_out", amount, toAccountNumber, "pending", scheduledFor);
+                    int outgoingId = lastTransactionId(conn);
                     TransactionDAO.logTransaction(conn, toAccountNumber, "transfer_in", amount, fromAccountNumber, "pending", scheduledFor);
+                    updateTransferReference(conn, "counterpart_transaction_id", outgoingId, lastTransactionId(conn));
                     
                     System.out.println("Transfer of $" + String.format("%.2f", amount) + " scheduled for " + scheduledFor + ".");
                 }
@@ -227,6 +230,7 @@ public class TransactionDAO {
                 } else {
                     TransactionDAO.logTransaction(conn, fromInternalAccount, "transfer_out",
                                                   amount, externalLabel, "pending", scheduledFor);
+                    updateTransferReference(conn, "external_account_id", lastTransactionId(conn), externalAccountId);
                 }
 
                 conn.commit();
@@ -346,6 +350,146 @@ public class TransactionDAO {
     }
     
 
+    private static int lastTransactionId(Connection conn) throws SQLException {
+        try (Statement stmt = conn.createStatement();
+             ResultSet row = stmt.executeQuery("SELECT last_insert_rowid()")) {
+            if (row.next()) return row.getInt(1);
+            throw new SQLException("Missing transaction ID after insert.");
+        }
+    }
+
+    // column is supplied only by the two scheduled-transfer creation paths.
+    private static void updateTransferReference(Connection conn, String column, int id, int reference) throws SQLException {
+        try (PreparedStatement stmt = conn.prepareStatement(
+                "UPDATE transactions SET " + column + " = ? WHERE transaction_id = ?")) {
+            stmt.setInt(1, reference);
+            stmt.setInt(2, id);
+            stmt.executeUpdate();
+        }
+    }
+
+    public record TransferRunResult(int completed, int failed) {
+        public int getCompleted() { return completed; }
+        public int getFailed() { return failed; }
+    }
+
+    private record DueTransfer(int id, String source, String destination, double amount,
+                               String scheduledFor, Integer externalAccountId,
+                               String sourceStatus, double balance) {}
+
+    public static TransferRunResult processDueTransfers(int userId, String cutoffUtc) throws SQLException {
+        int completed = 0;
+        int failed = 0;
+        try (Connection conn = DatabaseManager.getConnection(); Statement transaction = conn.createStatement()) {
+            transaction.execute("PRAGMA busy_timeout = 5000");
+            while (true) {
+                // Acquire SQLite's write lock before selecting the next pending row.
+                transaction.execute("BEGIN IMMEDIATE");
+                try {
+                    DueTransfer due = findNextDueTransfer(conn, userId, cutoffUtc);
+                    String failure = due == null ? null : settleDueTransfer(conn, userId, due);
+                    transaction.execute("COMMIT");
+                    if (due == null) return new TransferRunResult(completed, failed);
+                    if (failure == null) completed++;
+                    else failed++;
+                } catch (SQLException | RuntimeException failure) {
+                    try {
+                        transaction.execute("ROLLBACK");
+                    } catch (SQLException rollbackFailure) {
+                        failure.addSuppressed(rollbackFailure);
+                    }
+                    throw failure;
+                }
+            }
+        }
+    }
+
+    private static DueTransfer findNextDueTransfer(Connection conn, int userId, String cutoffUtc) throws SQLException {
+        String sql = """
+            SELECT t.transaction_id, t.account_number, t.related_account, t.amount, t.scheduled_for,
+                   t.external_account_id, a.status AS source_status, a.balance
+            FROM transactions t
+            JOIN bank_accounts a ON a.account_number = t.account_number
+            WHERE a.user_id = ? AND t.transaction_type = 'transfer_out' AND t.status = 'pending'
+              AND t.recurrence_interval = 0 AND t.recurrence_unit = 'none'
+              AND datetime(t.scheduled_for) <= datetime(?)
+            ORDER BY datetime(t.scheduled_for), t.transaction_id
+            LIMIT 1
+            """;
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, userId);
+            stmt.setString(2, cutoffUtc);
+            try (ResultSet row = stmt.executeQuery()) {
+                if (!row.next()) return null;
+                int externalId = row.getInt("external_account_id");
+                Integer externalReference = row.wasNull() ? null : externalId;
+                return new DueTransfer(row.getInt("transaction_id"), row.getString("account_number"),
+                    row.getString("related_account"), row.getDouble("amount"), row.getString("scheduled_for"),
+                    externalReference, row.getString("source_status"), row.getDouble("balance"));
+            }
+        }
+    }
+
+    private static String settleDueTransfer(Connection conn, int userId, DueTransfer due) throws SQLException {
+        String destination = due.destination();
+        boolean external = destination != null && destination.startsWith("EXT-");
+        int counterpartId = destination != null && !external
+            ? findCounterpartTransferId(conn, due.id(), destination, due.source(), due.amount(), due.scheduledFor())
+            : -1;
+
+        String failure = null;
+        if (!"active".equals(due.sourceStatus())) failure = "The source account is inactive.";
+        else if (!Double.isFinite(due.amount()) || due.amount() <= 0) failure = "The transfer amount is invalid.";
+        else if (due.balance() < due.amount()) failure = "Insufficient funds on the day the transfer was processed.";
+        else if (external && !externalRecipientAvailable(conn, userId, due)) failure = "The saved external account is unavailable.";
+        else if (!external && (counterpartId == -1 || destination.equals(due.source())
+                || !activeDestination(conn, destination))) failure = "The destination account is unavailable.";
+
+        if (failure == null) {
+            processWithdrawal(conn, due.source(), due.amount());
+            if (!external) processDeposit(conn, destination, due.amount());
+        }
+        updateDueTransferStatus(conn, due.id(), failure);
+        if (counterpartId != -1) updateDueTransferStatus(conn, counterpartId, failure);
+        return failure;
+    }
+
+    private static boolean externalRecipientAvailable(Connection conn, int userId, DueTransfer due) throws SQLException {
+        String sql = """
+            SELECT COUNT(*) FROM external_accounts
+            WHERE user_id = ? AND account_number = ?
+            """;
+        if (due.externalAccountId() != null) sql += " AND external_account_id = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, userId);
+            stmt.setString(2, due.destination().substring("EXT-".length()));
+            if (due.externalAccountId() != null) stmt.setInt(3, due.externalAccountId());
+            try (ResultSet row = stmt.executeQuery()) {
+                return row.next() && row.getInt(1) == 1;
+            }
+        }
+    }
+
+    private static boolean activeDestination(Connection conn, String destination) throws SQLException {
+        try (PreparedStatement stmt = conn.prepareStatement(
+                "SELECT 1 FROM bank_accounts WHERE account_number = ? AND status = 'active'")) {
+            stmt.setString(1, destination);
+            try (ResultSet row = stmt.executeQuery()) {
+                return row.next();
+            }
+        }
+    }
+
+    private static void updateDueTransferStatus(Connection conn, int id, String failure) throws SQLException {
+        try (PreparedStatement stmt = conn.prepareStatement(
+                "UPDATE transactions SET status = ?, failure_reason = ? WHERE transaction_id = ? AND status = 'pending'")) {
+            stmt.setString(1, failure == null ? "completed" : "failed");
+            stmt.setString(2, failure);
+            stmt.setInt(3, id);
+            if (stmt.executeUpdate() != 1) throw new SQLException("Pending transfer changed during settlement.");
+        }
+    }
+
     // ------- EDITORS --------
     /**
      * Edits the amount and/or scheduled date of a pending payment.
@@ -446,7 +590,7 @@ public class TransactionDAO {
 
                 // If it's an outgoing internal transfer, sync the recipient's matching transfer_in leg
                 if ("transfer_out".equals(type) && relatedAccount != null && !relatedAccount.startsWith("EXT-")) {
-                    int counterpartId = findCounterpartTransferId(conn, relatedAccount, accountNumber, oldAmount, oldScheduledFor);
+                    int counterpartId = findCounterpartTransferId(conn, transactionId, relatedAccount, accountNumber, oldAmount, oldScheduledFor);
                     if (counterpartId != -1) {
                         try (PreparedStatement updateCounterpart = conn.prepareStatement(updateSql)) {
                             updateCounterpart.setDouble(1, newAmount);
@@ -476,25 +620,26 @@ public class TransactionDAO {
     /**
      * Private helper to locate the recipient's matching 'transfer_in' row for a scheduled transfer.
      */
-    private static int findCounterpartTransferId(Connection conn, String recipientAcc, String senderAcc,
-                                                 double amount, String scheduledFor) throws SQLException {
-        String sql = "SELECT transaction_id FROM transactions " +
-                     "WHERE account_number = ? AND related_account = ? " +
-                     "AND transaction_type = 'transfer_in' AND amount = ? " +
-                     "AND scheduled_for = ? AND status = 'pending' LIMIT 1";
-
-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, recipientAcc);
-            pstmt.setString(2, senderAcc);
-            pstmt.setDouble(3, amount);
-            pstmt.setString(4, scheduledFor);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getInt("transaction_id");
-                }
+    private static int findCounterpartTransferId(Connection conn, int outgoingId, String recipientAcc,
+                                                 String senderAcc, double amount, String scheduledFor) throws SQLException {
+        String sql = """
+            SELECT transaction_id FROM transactions
+            WHERE transaction_id = (SELECT COALESCE(counterpart_transaction_id, transaction_id + 1)
+                                    FROM transactions WHERE transaction_id = ?)
+              AND account_number = ? AND related_account = ?
+              AND transaction_type = 'transfer_in' AND amount = ?
+              AND scheduled_for = ? AND status = 'pending'
+            """;
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, outgoingId);
+            stmt.setString(2, recipientAcc);
+            stmt.setString(3, senderAcc);
+            stmt.setDouble(4, amount);
+            stmt.setString(5, scheduledFor);
+            try (ResultSet row = stmt.executeQuery()) {
+                return row.next() ? row.getInt("transaction_id") : -1;
             }
         }
-        return -1;
     }
 
     /**
@@ -546,8 +691,8 @@ public class TransactionDAO {
                 }
 
                 // 3. If it's an outgoing transfer, cancel the recipient's matching transfer_in leg
-                if ("transfer_out".equals(type) && relatedAccount != null) {
-                    int counterpartId = findCounterpartTransferId(conn, relatedAccount, accountNumber, amount, scheduledFor);
+                if ("transfer_out".equals(type) && relatedAccount != null && !relatedAccount.startsWith("EXT-")) {
+                    int counterpartId = findCounterpartTransferId(conn, transactionId, relatedAccount, accountNumber, amount, scheduledFor);
                     if (counterpartId != -1) {
                         try (PreparedStatement cancelCounterpart = conn.prepareStatement(cancelSql)) {
                             cancelCounterpart.setInt(1, counterpartId);
@@ -579,7 +724,7 @@ public class TransactionDAO {
 
         // ORDER BY timestamp ASC ensures chronological order (oldest to newest)
         String sql = "SELECT transaction_id, account_number, transaction_type, amount, related_account, status, recurrence_interval, recurrence_unit, scheduled_for, created_at " +
-                     "FROM transactions WHERE account_number = ? ORDER BY created_at ASC";
+                     ", failure_reason FROM transactions WHERE account_number = ? ORDER BY created_at ASC";
 
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -607,7 +752,7 @@ public class TransactionDAO {
                     String created_at = rs.getString("created_at");
 
                     // Create the model and add it to the list
-                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, status, recurrenceInterval, recurrenceUnit, scheduledFor, created_at);
+                    Transaction transaction = new Transaction(id, accNum, type, amount, relatedAcc, status, recurrenceInterval, recurrenceUnit, scheduledFor, created_at, rs.getString("failure_reason"));
                     transactions.add(transaction);
 
                     // Determine if money is coming in or going out for formatting

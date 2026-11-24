@@ -67,6 +67,10 @@ export function getExternalAccounts(signal) {
     return request('/api/external-accounts', { signal });
 }
 
+export function processDueTransfers() {
+    return request('/api/transfers/process-due', { method: 'POST' });
+}
+
 export function createTransfer(transfer) {
     return request('/api/transfers', {
         method: 'POST',

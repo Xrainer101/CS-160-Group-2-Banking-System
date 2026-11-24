@@ -44,6 +44,7 @@ import {
   createAccount,
   closeAccount,
   moveAccountMoney,
+  processDueTransfers,
 } from "./api/bankingApi";
 
 import { getManagerPermission } from "./api/adminApi";
@@ -251,6 +252,8 @@ function AppContent() {
   ] = useState(false);
 
   const skipNextSessionLoadRef = useRef(false);
+  const [dueTransferStatus, setDueTransferStatus] = useState("");
+  const [accountDetailRevision, setAccountDetailRevision] = useState(0);
   const sessionVersionRef = useRef(0);
   const openingAccountRef = useRef(false);
 
@@ -311,6 +314,26 @@ function AppContent() {
   // ====================================================
   // REFRESH ACCOUNT DATA
   // ====================================================
+
+  async function tryProcessDueTransfers() {
+    try {
+      await processDueTransfers();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function retryDueTransfers() {
+    if (dueTransferStatus === "working") return;
+    const version = sessionVersionRef.current;
+    setDueTransferStatus("working");
+    const processed = await tryProcessDueTransfers();
+    const refreshed = await refreshAccounts(version);
+    if (version !== sessionVersionRef.current) return;
+    if (refreshed) setAccountDetailRevision(value => value + 1);
+    setDueTransferStatus(processed && refreshed ? "" : "retry");
+  }
 
   async function refreshAccounts(
     version = sessionVersionRef.current
@@ -715,10 +738,13 @@ function AppContent() {
 
       try {
         const profile = await getCurrentUser();
+        const dueProcessed = await tryProcessDueTransfers();
         const accountData = await getAccounts();
         const permission = await getManagerPermission();
 
         if (cancelled) return;
+
+        setDueTransferStatus(dueProcessed ? "" : "retry");
 
         setUser(userFromProfile(profile));
 
@@ -778,9 +804,11 @@ function AppContent() {
 
     try {
       const profile = await getCurrentUser();
+      const dueProcessed = await tryProcessDueTransfers();
       const accountData = await getAccounts();
       const permission = await getManagerPermission();
 
+      setDueTransferStatus(dueProcessed ? "" : "retry");
       setUser(userFromProfile(profile));
 
       setAccounts(accountData.accounts || []);
@@ -820,6 +848,7 @@ function AppContent() {
 
   function signOut() {
     sessionVersionRef.current += 1;
+    setDueTransferStatus("");
 
     sessionStorage.removeItem(DEMO_STORAGE_KEY);
 
@@ -1081,6 +1110,15 @@ function AppContent() {
         </div>
       )}
 
+      {!demoMode && user && dueTransferStatus && (
+        <div className="toast" role="status">
+          {dueTransferStatus === "working" ? "Checking due transfers…" : "Could not refresh due transfer status."}
+          <button type="button" disabled={dueTransferStatus === "working"} onClick={retryDueTransfers}>
+            Retry
+          </button>
+        </div>
+      )}
+
       {bankingError && (
         <div
           className="toast"
@@ -1254,9 +1292,7 @@ function AppContent() {
                             />
                           ) : (
                             <AccountDetail
-                              key={
-                                session?.access_token
-                              }
+                              key={`${session?.access_token}:${accountDetailRevision}`}
                               onCloseAccount={
                                 handleCloseAccount
                               }

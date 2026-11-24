@@ -37,7 +37,7 @@ export function TransactionRows({ transactions }) {
                 <small>
                   {t.category} · {t.date}
                   {t.status === 'pending' && ` · Pending${t.scheduled_for ? ` for ${t.scheduled_for.slice(0, 10)}` : ''}`}
-                  {t.status === 'failed' && ' · Failed'}
+                  {t.status === 'failed' && (t.failure_reason ? ` · Failed: ${t.failure_reason}` : ' · Failed')}
                   {t.status === 'cancelled' && ' · Cancelled'}
                 </small>
               </div>

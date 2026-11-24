@@ -10,7 +10,8 @@ from typing import Annotated, Literal
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from urllib.parse import quote
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time as time_of_day, timedelta, timezone
+from zoneinfo import ZoneInfo
 import bcrypt   # For securely hashing passwords
 import jwt      # For creating and verifying JSON Web Tokens (JWTs)
 from jwt import PyJWKClient  # Gets Auth0's public keys for token validation
@@ -945,6 +946,9 @@ class ExternalAccountDestination(BaseModel):
     external_account_id: int = Field(gt=0, strict=True)
 
 
+TRANSFER_TIME_ZONE = ZoneInfo("America/Los_Angeles")
+
+
 class TransferRequest(MovementRequest):
     source_account_id: int = Field(gt=0, strict=True)
     destination: Annotated[
@@ -961,12 +965,12 @@ class TransferRequest(MovementRequest):
         try:
             if isinstance(value, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
                 parsed = date.fromisoformat(value)
-                if parsed > datetime.now(timezone.utc).date():
+                if parsed > datetime.now(TRANSFER_TIME_ZONE).date():
                     return parsed
         except ValueError:
             pass
         raise HTTPException(status_code=422, detail={
-            "field": "scheduled_for", "message": "Choose a future date (UTC).",
+            "field": "scheduled_for", "message": "Choose a future date.",
         })
 
 
@@ -1031,13 +1035,27 @@ def create_transfer(request: TransferRequest, user=Depends(get_current_user)):
             })
         saved = send(source_number, target, amount)
     else:
-        saved = send(source_number, target, amount, f"{request.scheduled_for} 00:00:00")
+        scheduled_at = datetime.combine(request.scheduled_for, time_of_day.min, tzinfo=TRANSFER_TIME_ZONE)
+        scheduled_utc = scheduled_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        saved = send(source_number, target, amount, scheduled_utc)
 
     if not saved:
         raise HTTPException(status_code=409, detail="Unable to submit the transfer. Refresh your accounts and try again.")
     if request.scheduled_for is not None:
         return {"status": "pending", "scheduled_for": request.scheduled_for.isoformat()}
     return {"status": "completed"}
+
+
+@app.post("/api/transfers/process-due")
+def process_due_transfers(user=Depends(get_current_user)):
+    transaction_dao = jpype.JClass("database.TransactionDAO")
+    cutoff = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        result = transaction_dao.processDueTransfers(user["banking_user"]["user_id"], cutoff)
+    except jpype.JException as error:
+        logger.exception("Unable to process due transfers")
+        raise HTTPException(status_code=503, detail="Due transfers could not be processed. Please retry.") from error
+    return {"completed": int(result.getCompleted()), "failed": int(result.getFailed())}
 
 
 @app.post("/api/accounts/{account_id}/deposit")
@@ -1133,6 +1151,10 @@ def serialize_accounts(java_accounts, include_details=False):
                     "account": account_id,
                     "transaction_type": transaction_type,
                     "status": status,
+                    "failure_reason": (
+                        _format_datetime(transaction.getFailureReason())
+                        if status == "failed" and transaction_type == "transfer_out" else None
+                    ),
                     "scheduled_for": _format_datetime(transaction.getScheduledFor()),
                     "icon": icon,
                 }
