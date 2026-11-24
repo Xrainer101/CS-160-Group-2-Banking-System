@@ -1,6 +1,24 @@
 # CS-160-Group-2-Banking-System
 Software Engineering class project
 
+## Run the web project with Docker Compose
+
+1. Start Docker with Compose (for example, Docker Desktop or OrbStack). Stop any dev server using port 5173.
+2. Copy the supplied `.env` file to the repository root and the supplied `.env.local` file to `frontend/.env.local`.
+3. From the repository root, run:
+
+   ```bash
+   docker compose --env-file .env --env-file frontend/.env.local up --build -d
+   ```
+
+   Open [http://localhost:5173](http://localhost:5173).
+
+**Stop the project**
+
+```bash
+docker compose --env-file .env --env-file frontend/.env.local down
+```
+
 ## Running the Frontend and Backend for dev
 Run the following commands in the terminal inside the corresponding folder (backend or frontend). You may need to download uv, npm, and maven first if you don't have them
 

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import jpype
@@ -6,7 +7,7 @@ import jpype
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 JAVA_CLASSES = PROJECT_ROOT / "target" / "classes"
 JAVA_DEPENDENCIES = PROJECT_ROOT / "target" / "dependency"
-DATABASE_FILE = PROJECT_ROOT / "bank.db"
+DATABASE_FILE = Path(os.getenv("JAVA_DATABASE_PATH") or PROJECT_ROOT / "bank.db")
 
 DEMO_ACCOUNTS = (
     ("checking", 6551.43),
@@ -62,7 +63,7 @@ def _seed_demo_data() -> None:
 
 
 def initialize_java_database() -> None:
-    # Initialize the root-level bank.db using the Java DatabaseManager.
+    # Initialize the configured SQLite database using the Java DatabaseManager.
     if not (JAVA_CLASSES / "database" / "DatabaseManager.class").is_file():
         raise RuntimeError(
             "Java classes are missing. From the project root, run "

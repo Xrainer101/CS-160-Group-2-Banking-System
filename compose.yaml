@@ -1,0 +1,31 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      JAVA_DATABASE_PATH: /data/bank.db
+      DATABASE_PATH: /data/auth.db
+      CHECK_DEPOSIT_DB_PATH: /data/check-deposits.db
+    volumes:
+      - banking-data:/data
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_AUTH0_DOMAIN: "${VITE_AUTH0_DOMAIN:?Set VITE_AUTH0_DOMAIN in the root .env file}"
+        VITE_AUTH0_CLIENT_ID: "${VITE_AUTH0_CLIENT_ID:?Set VITE_AUTH0_CLIENT_ID in the root .env file}"
+        VITE_AUTH0_AUDIENCE: "${VITE_AUTH0_AUDIENCE:?Set VITE_AUTH0_AUDIENCE in the root .env file}"
+        VITE_API_BASE_URL: http://localhost:5173
+        VITE_API_URL: http://localhost:5173
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  banking-data:
